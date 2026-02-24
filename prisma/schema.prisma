@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         Role
+  createdAt    DateTime @default(now())
+  loans        Loan[]
+}
+
+enum Role {
+  ADMIN
+  STAFF
+  PATRON
+}
+
+model Book {
+  id            String      @id @default(uuid())
+  title         String
+  author        String
+  isbn          String      @unique
+  genre         String?
+  deweyDecimal  String?
+  coverImageUrl String?
+  createdAt     DateTime    @default(now())
+  copies        BookCopy[]
+}
+
+model BookCopy {
+  id        String     @id @default(uuid())
+  book      Book       @relation(fields: [bookId], references: [id])
+  bookId    String
+  barcode   String     @unique
+  status    CopyStatus @default(AVAILABLE)
+  shelf     ShelfSection? @relation(fields: [shelfId], references: [id])
+  shelfId   String?
+  loans     Loan[]
+}
+
+enum CopyStatus {
+  AVAILABLE
+  CHECKED_OUT
+  LOST
+  PROCESSING
+}
+
+model Loan {
+  id           String     @id @default(uuid())
+  user         User       @relation(fields: [userId], references: [id])
+  userId       String
+  bookCopy     BookCopy   @relation(fields: [bookCopyId], references: [id])
+  bookCopyId   String
+  checkedOutAt DateTime   @default(now())
+  dueDate      DateTime
+  returnedAt   DateTime?
+  fineAmount   Float      @default(0)
+}
+
+model ShelfSection {
+  id     String     @id @default(uuid())
+  label  String
+  mapX   Int
+  mapY   Int
+  width  Int
+  height Int
+  floor  Int
+  copies BookCopy[]
+}
+
+model IngestionJob {
+  id              String     @id @default(uuid())
+  imageUrl        String
+  status          IngestionStatus @default(PENDING)
+  ocrText         String?
+  detectedIsbn    String?
+  suggestedDewey  String?
+  confidenceScore Float?
+  reviewedBy      String?
+  createdAt       DateTime   @default(now())
+}
+
+enum IngestionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
