@@ -16,22 +16,29 @@
   "author": "Team 10",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2",
+    "@aws-sdk/client-s3": "^3.996.0",
+    "@aws-sdk/client-sqs": "^3.996.0",
+    "@aws-sdk/client-textract": "^3.996.0",
+    "@prisma/client": "^5.7.1",
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
+    "express": "^4.18.2",
     "helmet": "^7.0.0",
     "morgan": "^1.10.0",
-    "@prisma/client": "^5.7.1"
+    "multer": "^2.0.2",
+    "openai": "^6.23.0"
   },
   "devDependencies": {
-    "typescript": "^5.3.3",
-    "ts-node": "^10.9.1",
-    "tsx": "^3.12.7",
+    "@types/aws-lambda": "^8.10.160",
+    "@types/cors": "^2.8.13",
+    "@types/express": "^4.17.17",
+    "@types/morgan": "^1.9.4",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^20.8.6",
     "nodemon": "^3.0.1",
     "prisma": "^5.7.1",
-    "@types/express": "^4.17.17",
-    "@types/cors": "^2.8.13",
-    "@types/morgan": "^1.9.4",
-    "@types/node": "^20.8.6"
+    "ts-node": "^10.9.1",
+    "tsx": "^3.12.7",
+    "typescript": "^5.3.3"
   }
 }
