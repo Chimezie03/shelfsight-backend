@@ -5,6 +5,8 @@ import {
   DetectDocumentTextCommand,
 } from '@aws-sdk/client-textract';
 import OpenAI from 'openai';
+const fetch = require('node-fetch');
+(globalThis as any).fetch = fetch;
 
 // ---------------------------------------------------------------------------
 // AWS & OpenAI clients (initialised lazily from env vars)

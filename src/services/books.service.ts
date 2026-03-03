@@ -8,6 +8,42 @@ interface FetchBooksParams {
   page?: number;
   limit?: number;
 }
+export async function createBookService(data: any) {
+  // Basic validation (expand as needed)
+  if (!data.title || !data.author || !data.isbn) {
+    throw new Error('Missing required fields: title, author, isbn');
+  }
+  return await prisma.book.create({
+    data: {
+      title: data.title,
+      author: data.author,
+      isbn: data.isbn,
+      genre: data.genre,
+      deweyDecimal: data.deweyDecimal,
+      coverImageUrl: data.coverImageUrl,
+    }
+  });
+}
+
+export async function updateBookService(id: string, data: any) {
+  return await prisma.book.update({
+    where: { id },
+    data: {
+      title: data.title,
+      author: data.author,
+      isbn: data.isbn,
+      genre: data.genre,
+      deweyDecimal: data.deweyDecimal,
+      coverImageUrl: data.coverImageUrl,
+    }
+  });
+}
+
+export async function deleteBookService(id: string) {
+  return await prisma.book.delete({
+    where: { id }
+  });
+}
 
 export async function fetchBooks(params: FetchBooksParams) {
   const { title, author, isbn, genre, page = 1, limit = 20 } = params;

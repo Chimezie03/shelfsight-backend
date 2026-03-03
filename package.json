@@ -20,8 +20,13 @@
     "@aws-sdk/client-sqs": "^3.996.0",
     "@aws-sdk/client-textract": "^3.996.0",
     "@prisma/client": "^5.7.1",
+<<<<<<< HEAD
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
+=======
+    "@types/bcryptjs": "^3.0.0",
+    "bcryptjs": "^3.0.3",
+>>>>>>> 4fe7ecfe5c39cb943344d7210a4286f1f9f91e66
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
@@ -29,6 +34,7 @@
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.0",
     "multer": "^2.0.2",
+    "node-fetch": "^2.7.0",
     "openai": "^6.23.0"
   },
   "devDependencies": {
@@ -41,6 +47,7 @@
     "@types/morgan": "^1.9.4",
     "@types/multer": "^2.0.0",
     "@types/node": "^20.8.6",
+    "@types/node-fetch": "^2.6.13",
     "nodemon": "^3.0.1",
     "prisma": "^5.7.1",
     "ts-node": "^10.9.1",
