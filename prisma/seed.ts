@@ -1,12 +1,16 @@
 import prisma from '../src/lib/prisma';
+import bcrypt from 'bcryptjs';
 
 async function main() {
+  // Hash a default password for seed users
+  const defaultPassword = await bcrypt.hash('password123', 12);
+
   // Seed sample users
   await prisma.user.createMany({
     data: [
-      { email: 'admin@shelfsight.com', passwordHash: 'hashedpw', name: 'Admin User', role: 'ADMIN' },
-      { email: 'staff@shelfsight.com', passwordHash: 'hashedpw', name: 'Staff User', role: 'STAFF' },
-      { email: 'patron@shelfsight.com', passwordHash: 'hashedpw', name: 'Patron User', role: 'PATRON' }
+      { email: 'admin@shelfsight.com', passwordHash: defaultPassword, name: 'Admin User', role: 'ADMIN' },
+      { email: 'staff@shelfsight.com', passwordHash: defaultPassword, name: 'Staff User', role: 'STAFF' },
+      { email: 'patron@shelfsight.com', passwordHash: defaultPassword, name: 'Patron User', role: 'PATRON' }
     ]
   });
 
