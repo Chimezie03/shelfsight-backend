@@ -36,14 +36,15 @@ model Book {
 }
 
 model BookCopy {
-  id        String     @id @default(uuid())
-  book      Book       @relation(fields: [bookId], references: [id])
+  id        String          @id @default(uuid())
+  book      Book            @relation(fields: [bookId], references: [id])
   bookId    String
-  barcode   String     @unique
-  status    CopyStatus @default(AVAILABLE)
-  shelf     ShelfSection? @relation(fields: [shelfId], references: [id])
+  barcode   String          @unique
+  status    CopyStatus      @default(AVAILABLE)
+  shelf     ShelfSection?   @relation(fields: [shelfId], references: [id])
   shelfId   String?
   loans     Loan[]
+  events    BookCopyEvent[]
 }
 
 enum CopyStatus {
@@ -51,6 +52,29 @@ enum CopyStatus {
   CHECKED_OUT
   LOST
   PROCESSING
+}
+
+model BookCopyEvent {
+  id         String        @id @default(uuid())
+  bookCopy   BookCopy      @relation(fields: [bookCopyId], references: [id])
+  bookCopyId String
+  type       CopyEventType
+  userId     String?
+  shelfId    String?
+  loanId     String?
+  note       String?
+  createdAt  DateTime      @default(now())
+
+  @@index([bookCopyId, createdAt])
+}
+
+enum CopyEventType {
+  CHECKED_OUT
+  RETURNED
+  SHELVED
+  MOVED
+  MARKED_LOST
+  MARKED_PROCESSING
 }
 
 model Loan {
