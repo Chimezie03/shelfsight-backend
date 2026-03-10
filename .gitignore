@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+prisma/*.db
+env.*
+env.local
+dev_commands.txt
+Project Proposal Team 10
+api_todo_reference.txt
