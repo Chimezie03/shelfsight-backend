@@ -10,12 +10,16 @@ import {
 
 export async function checkout(req: Request, res: Response) {
   try {
-    const userId = req.user?.userId;
-    const { bookCopyId, dueDays } = req.body;
+    const { bookCopyId, dueDays, userId: targetUserId } = req.body;
 
     if (!bookCopyId) {
       return res.status(400).json({ error: 'Missing required field: bookCopyId' });
     }
+
+    // Allow admin/staff to checkout on behalf of another user
+    const userId = (targetUserId && (req.user?.role === 'ADMIN' || req.user?.role === 'STAFF'))
+      ? targetUserId
+      : req.user?.userId;
 
     const loan = await checkoutService(userId!, bookCopyId, dueDays);
     res.status(201).json(loan);

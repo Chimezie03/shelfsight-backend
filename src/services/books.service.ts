@@ -75,6 +75,7 @@ export async function fetchBooks(params: FetchBooksParams) {
       coverImageUrl: book.coverImageUrl,
       availableCopies: book.copies.filter(c => c.status === 'AVAILABLE').length,
       totalCopies: book.copies.length,
+      availableCopyIds: book.copies.filter(c => c.status === 'AVAILABLE').map(c => c.id),
       createdAt: book.createdAt
     })),
     pagination: {

@@ -48,3 +48,6 @@ export function requireRole(...allowedRoles: string[]) {
     next();
   };
 }
+
+// Alias for backward compatibility with routes using the old name
+export const authenticateJWT = requireAuth;
