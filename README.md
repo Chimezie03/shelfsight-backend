@@ -50,8 +50,54 @@ npm run dev
 ```
 
 ### 8. Test authentication endpoints
-- POST `/auth/login` with admin credentials from seed (`admin@shelfsight.com` / `adminpassword`)
+- POST `/auth/login` with admin credentials from seed (`admin@shelfsight.com` / `password123`)
 - GET `/auth/me` with JWT from login
 
 ---
 For troubleshooting, see error messages in the terminal or ask for help in the project chat.
+
+## Supabase Runbook (Team)
+
+Use this flow for reliable setup when running against Supabase free tier.
+
+### 1. Configure .env
+Set these values in `.env`:
+
+```sh
+DATABASE_URL="postgresql://postgres.<project-ref>:<password>@aws-1-us-east-1.pooler.supabase.com:6543/postgres?pgbouncer=true&sslmode=require"
+DIRECT_URL="postgresql://postgres.<project-ref>:<password>@aws-1-us-east-1.pooler.supabase.com:5432/postgres?sslmode=require"
+```
+
+Notes:
+- Use the exact URI values from Supabase Project Settings > Database > Connection string.
+- Do not use the `db.<project-ref>.supabase.co` host on networks that do not support IPv6.
+
+### 2. Apply schema
+Preferred:
+
+```sh
+npx prisma migrate deploy
+```
+
+If migration over 5432 is blocked on your network, apply migration SQL directly in Supabase SQL Editor in this order:
+1. `prisma/migrations/20260223230904_init/migration.sql`
+2. `prisma/migrations/20260309151459_add_book_copy_events/migration.sql`
+
+### 3. Seed data
+Run:
+
+```sh
+npx prisma db seed
+```
+
+Expected outcome includes a final line similar to:
+
+```text
+Seeding complete. Created 42 loans.
+```
+
+### 4. Verify seed counts (optional)
+
+```sh
+npx tsx -e "import { PrismaClient } from '@prisma/client'; const p=new PrismaClient(); const m=async()=>{const [users,books,copies,loans,shelves,events]=await Promise.all([p.user.count(),p.book.count(),p.bookCopy.count(),p.loan.count(),p.shelfSection.count(),p.bookCopyEvent.count()]); console.log({users,books,copies,loans,shelves,events}); await p.$disconnect();}; m();"
+```

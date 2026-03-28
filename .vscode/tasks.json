@@ -1,0 +1,17 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "prisma db push clean",
+			"type": "shell",
+			"command": "npx",
+			"args": [
+				"prisma",
+				"db",
+				"push",
+				"--accept-data-loss"
+			],
+			"isBackground": false
+		}
+	]
+}
