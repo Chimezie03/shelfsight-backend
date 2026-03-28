@@ -82,7 +82,16 @@ async function processRecord(record: SQSRecord): Promise<void> {
   const isbn = detectIsbn(ocrText);
   const metadata = isbn
     ? await enrichMetadata(isbn)
-    : { isbn: null, title: null, author: null, publisher: null, publishDate: null, source: null };
+    : {
+        isbn: null,
+        title: null,
+        author: null,
+        publisher: null,
+        publishDate: null,
+        coverImageUrl: null,
+        subjects: [],
+        source: null,
+      };
 
   // 4. Dewey classification via LLM
   const dewey = await classifyDeweyDecimal(ocrText, metadata);

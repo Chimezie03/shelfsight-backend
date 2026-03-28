@@ -8,20 +8,29 @@ interface FetchBooksParams {
   page?: number;
   limit?: number;
 }
+const bookPayload = (data: any) => ({
+  title: data.title,
+  author: data.author,
+  isbn: data.isbn,
+  genre: data.genre,
+  deweyDecimal: data.deweyDecimal,
+  coverImageUrl: data.coverImageUrl,
+  publishYear: data.publishYear ?? data.publishDate ?? undefined,
+});
+
 export async function createBookService(data: any) {
-  // Basic validation (expand as needed)
   if (!data.title || !data.author || !data.isbn) {
     throw new Error('Missing required fields: title, author, isbn');
   }
+  const existing = await prisma.book.findUnique({ where: { isbn: data.isbn } });
+  if (existing) {
+    return await prisma.book.update({
+      where: { id: existing.id },
+      data: bookPayload(data),
+    });
+  }
   return await prisma.book.create({
-    data: {
-      title: data.title,
-      author: data.author,
-      isbn: data.isbn,
-      genre: data.genre,
-      deweyDecimal: data.deweyDecimal,
-      coverImageUrl: data.coverImageUrl,
-    }
+    data: bookPayload(data),
   });
 }
 
@@ -35,6 +44,7 @@ export async function updateBookService(id: string, data: any) {
       genre: data.genre,
       deweyDecimal: data.deweyDecimal,
       coverImageUrl: data.coverImageUrl,
+      publishYear: data.publishYear ?? data.publishDate ?? undefined,
     }
   });
 }
@@ -73,6 +83,7 @@ export async function fetchBooks(params: FetchBooksParams) {
       genre: book.genre,
       deweyDecimal: book.deweyDecimal,
       coverImageUrl: book.coverImageUrl,
+      publishYear: book.publishYear,
       availableCopies: book.copies.filter(c => c.status === 'AVAILABLE').length,
       totalCopies: book.copies.length,
       availableCopyIds: book.copies.filter(c => c.status === 'AVAILABLE').map(c => c.id),

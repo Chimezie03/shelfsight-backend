@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { analyzeBookImage } from '../controllers/ingest.controller';
+import { analyzeBookImage, lookupBookByIsbn } from '../controllers/ingest.controller';
 
 const router = Router();
 
@@ -9,6 +9,13 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB max
 });
+
+/**
+ * GET /ingest/lookup?isbn=...
+ * Accepts an ISBN and returns normalized metadata from Open Library with
+ * Google Books as fallback.
+ */
+router.get('/lookup', lookupBookByIsbn);
 
 /**
  * POST /ingest/analyze

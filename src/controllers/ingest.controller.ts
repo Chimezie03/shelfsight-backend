@@ -4,6 +4,9 @@ import {
   extractTextFromImage,
   detectIsbn,
   enrichMetadata,
+  hasMetadata,
+  isValidIsbn,
+  normalizeIsbn,
   classifyDeweyDecimal,
   type BookMetadata,
 } from '../services/ingest.service';
@@ -59,6 +62,8 @@ export async function analyzeBookImage(req: Request, res: Response) {
       author: null,
       publisher: null,
       publishDate: null,
+      coverImageUrl: null,
+      subjects: [],
       source: null,
     };
 
@@ -99,6 +104,46 @@ export async function analyzeBookImage(req: Request, res: Response) {
     res.status(500).json({
       error: 'Internal Server Error',
       message: err.message || 'An unexpected error occurred during image analysis.',
+    });
+  }
+}
+
+export async function lookupBookByIsbn(req: Request, res: Response) {
+  try {
+    const isbnParam = typeof req.query.isbn === 'string' ? req.query.isbn : '';
+    const isbn = normalizeIsbn(isbnParam);
+
+    if (!isbn) {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: 'Query parameter "isbn" is required.',
+      });
+      return;
+    }
+
+    if (!isValidIsbn(isbn)) {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: 'ISBN must be a valid 10-digit or 13-digit value.',
+      });
+      return;
+    }
+
+    const metadata = await enrichMetadata(isbn);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        isbn,
+        found: hasMetadata(metadata),
+        metadata,
+      },
+    });
+  } catch (err: any) {
+    console.error('[ingest] lookupBookByIsbn error:', err);
+    res.status(500).json({
+      error: 'Internal Server Error',
+      message: err.message || 'An unexpected error occurred during ISBN lookup.',
     });
   }
 }

@@ -165,7 +165,17 @@ export interface BookMetadata {
   author: string | null;
   publisher: string | null;
   publishDate: string | null;
+  coverImageUrl: string | null;
+  subjects: string[];
   source: string | null;
+}
+
+export function normalizeIsbn(rawIsbn: string): string {
+  return rawIsbn.replace(/[^0-9Xx]/g, '').toUpperCase();
+}
+
+export function isValidIsbn(isbn: string): boolean {
+  return /^(?:\d{9}[\dX]|\d{13})$/.test(isbn);
 }
 
 /**
@@ -206,6 +216,8 @@ export async function enrichMetadata(isbn: string): Promise<BookMetadata> {
     author: null,
     publisher: null,
     publishDate: null,
+    coverImageUrl: null,
+    subjects: [],
     source: null,
   };
 
@@ -224,6 +236,10 @@ export async function enrichMetadata(isbn: string): Promise<BookMetadata> {
       base.publisher =
         entry.publishers?.map((p: any) => p.name).join(', ') ?? null;
       base.publishDate = entry.publish_date ?? null;
+      base.coverImageUrl =
+        entry.cover?.large ?? entry.cover?.medium ?? entry.cover?.small ?? null;
+      base.subjects =
+        entry.subjects?.map((subject: any) => subject.name).filter(Boolean) ?? [];
       base.source = 'Open Library';
       return base;
     }
@@ -244,6 +260,11 @@ export async function enrichMetadata(isbn: string): Promise<BookMetadata> {
       base.author = vol.authors?.join(', ') ?? null;
       base.publisher = vol.publisher ?? null;
       base.publishDate = vol.publishedDate ?? null;
+      base.coverImageUrl =
+        vol.imageLinks?.thumbnail ??
+        vol.imageLinks?.smallThumbnail ??
+        null;
+      base.subjects = vol.categories ?? [];
       base.source = 'Google Books';
       return base;
     }
@@ -252,6 +273,17 @@ export async function enrichMetadata(isbn: string): Promise<BookMetadata> {
   }
 
   return base;
+}
+
+export function hasMetadata(metadata: BookMetadata): boolean {
+  return Boolean(
+    metadata.title ||
+      metadata.author ||
+      metadata.publisher ||
+      metadata.publishDate ||
+      metadata.coverImageUrl ||
+      metadata.subjects.length,
+  );
 }
 
 // ---------------------------------------------------------------------------
