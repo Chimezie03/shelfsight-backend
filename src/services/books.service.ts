@@ -1,4 +1,6 @@
+import type { Book, BookCopy } from '@prisma/client';
 import prisma from '../lib/prisma';
+import { AppError } from '../lib/errors';
 
 interface FetchBooksParams {
   title?: string;
@@ -18,9 +20,33 @@ const bookPayload = (data: any) => ({
   publishYear: data.publishYear ?? data.publishDate ?? undefined,
 });
 
+/** Matches list-item shape expected by frontend `BackendBook` / catalog transforms. */
+export function mapBookWithCopies(book: Book & { copies: BookCopy[] }) {
+  return {
+    id: book.id,
+    title: book.title,
+    author: book.author,
+    isbn: book.isbn,
+    genre: book.genre,
+    deweyDecimal: book.deweyDecimal,
+    coverImageUrl: book.coverImageUrl,
+    publishYear: book.publishYear,
+    availableCopies: book.copies.filter((c) => c.status === 'AVAILABLE').length,
+    totalCopies: book.copies.length,
+    availableCopyIds: book.copies.filter((c) => c.status === 'AVAILABLE').map((c) => c.id),
+    createdAt: book.createdAt,
+  };
+}
+
 export async function createBookService(data: any) {
   if (!data.title || !data.author || !data.isbn) {
-    throw new Error('Missing required fields: title, author, isbn');
+    throw new AppError(400, 'VALIDATION_ERROR', 'Missing required fields: title, author, isbn', {
+      fieldErrors: {
+        ...(data.title ? {} : { title: 'Required' }),
+        ...(data.author ? {} : { author: 'Required' }),
+        ...(data.isbn ? {} : { isbn: 'Required' }),
+      },
+    });
   }
   const existing = await prisma.book.findUnique({ where: { isbn: data.isbn } });
   if (existing) {
@@ -45,13 +71,13 @@ export async function updateBookService(id: string, data: any) {
       deweyDecimal: data.deweyDecimal,
       coverImageUrl: data.coverImageUrl,
       publishYear: data.publishYear ?? data.publishDate ?? undefined,
-    }
+    },
   });
 }
 
 export async function deleteBookService(id: string) {
   return await prisma.book.delete({
-    where: { id }
+    where: { id },
   });
 }
 
@@ -70,30 +96,28 @@ export async function fetchBooks(params: FetchBooksParams) {
     take: limit,
     orderBy: { createdAt: 'desc' },
     include: {
-      copies: true
-    }
+      copies: true,
+    },
   });
 
   return {
-    data: books.map(book => ({
-      id: book.id,
-      title: book.title,
-      author: book.author,
-      isbn: book.isbn,
-      genre: book.genre,
-      deweyDecimal: book.deweyDecimal,
-      coverImageUrl: book.coverImageUrl,
-      publishYear: book.publishYear,
-      availableCopies: book.copies.filter(c => c.status === 'AVAILABLE').length,
-      totalCopies: book.copies.length,
-      availableCopyIds: book.copies.filter(c => c.status === 'AVAILABLE').map(c => c.id),
-      createdAt: book.createdAt
-    })),
+    data: books.map(mapBookWithCopies),
     pagination: {
       page,
       limit,
       total,
-      totalPages: Math.ceil(total / limit)
-    }
+      totalPages: Math.ceil(total / limit),
+    },
   };
+}
+
+export async function fetchBookById(id: string) {
+  const book = await prisma.book.findUnique({
+    where: { id },
+    include: { copies: true },
+  });
+  if (!book) {
+    throw new AppError(404, 'BOOK_NOT_FOUND', 'Book not found');
+  }
+  return mapBookWithCopies(book);
 }

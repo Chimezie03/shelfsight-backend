@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { wrapAsync } from '../lib/async-handler';
 import { authenticateJWT } from '../middleware/auth.middleware';
 import {
   checkout,
@@ -13,13 +14,12 @@ const router = Router();
 
 router.use(authenticateJWT);
 
-router.post('/checkout', checkout);
-router.post('/checkin', checkin);
-router.get('/', getLoans);
+router.post('/checkout', wrapAsync(checkout));
+router.post('/checkin', wrapAsync(checkin));
+router.get('/', wrapAsync(getLoans));
 
-// Book copy tracking
-router.get('/copies/:copyId/location', getCopyLocation);
-router.get('/copies/:copyId/history', getCopyHistory);
-router.post('/copies/:copyId/shelve', shelveCopy);
+router.get('/copies/:copyId/location', wrapAsync(getCopyLocation));
+router.get('/copies/:copyId/history', wrapAsync(getCopyHistory));
+router.post('/copies/:copyId/shelve', wrapAsync(shelveCopy));
 
 export default router;

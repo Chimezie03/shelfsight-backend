@@ -1,27 +1,17 @@
 import { Router } from 'express';
 import multer from 'multer';
+import { wrapAsync } from '../lib/async-handler';
 import { analyzeBookImage, lookupBookByIsbn } from '../controllers/ingest.controller';
 
 const router = Router();
 
-// Multer configured for in-memory buffering (buffer forwarded to S3 & Textract)
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB max
+  limits: { fileSize: 10 * 1024 * 1024 },
 });
 
-/**
- * GET /ingest/lookup?isbn=...
- * Accepts an ISBN and returns normalized metadata from Open Library with
- * Google Books as fallback.
- */
-router.get('/lookup', lookupBookByIsbn);
+router.get('/lookup', wrapAsync(lookupBookByIsbn));
 
-/**
- * POST /ingest/analyze
- * Accepts a single image upload (field: "image") and returns OCR text,
- * detected ISBN, enriched metadata, and Dewey Decimal classification.
- */
-router.post('/analyze', upload.single('image'), analyzeBookImage);
+router.post('/analyze', upload.single('image'), wrapAsync(analyzeBookImage));
 
 export default router;

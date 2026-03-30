@@ -6,6 +6,7 @@ import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 
 import routes from './routes';
+import { errorHandler } from './middleware/error-handler';
 
 declare global {
   namespace Express {
@@ -31,10 +32,6 @@ app.get('/health', (req, res) => {
 
 app.use('/', routes);
 
-// Global error handler
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error(err);
-  res.status(err.statusCode || 500).json({ error: err.name || 'Error', message: err.message || 'Internal Server Error', statusCode: err.statusCode || 500 });
-});
+app.use(errorHandler);
 
 export default app;
