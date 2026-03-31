@@ -92,26 +92,47 @@ model Loan {
 }
 
 model ShelfSection {
-  id     String     @id @default(uuid())
-  label  String
-  mapX   Int
-  mapY   Int
-  width  Int
-  height Int
-  floor  Int
-  copies BookCopy[]
+  id              String     @id @default(uuid())
+  label           String
+  mapX            Int
+  mapY            Int
+  width           Int
+  height          Int
+  floor           Int
+  sectionCode     String?
+  category        String?    @default("Uncategorized")
+  deweyRangeStart String?
+  deweyRangeEnd   String?
+  numberOfTiers   Int?       @default(4)
+  capacityPerTier Int?       @default(30)
+  color           String?    @default("#1B2A4A")
+  rotation        Int?       @default(0)
+  notes           String?
+  shelfType       String?    @default("single-shelf")
+  copies          BookCopy[]
 }
 
 model IngestionJob {
-  id              String     @id @default(uuid())
-  imageUrl        String
-  status          IngestionStatus @default(PENDING)
-  ocrText         String?
-  detectedIsbn    String?
-  suggestedDewey  String?
-  confidenceScore Float?
-  reviewedBy      String?
-  createdAt       DateTime   @default(now())
+  id                   String          @id @default(uuid())
+  imageUrl             String
+  status               IngestionStatus @default(PENDING)
+  ocrText              String?
+  detectedIsbn         String?
+  suggestedDewey       String?
+  confidenceScore      Float?
+  suggestedTitle       String?
+  suggestedAuthor      String?
+  suggestedPublisher   String?
+  suggestedPublishDate String?
+  suggestedGenre       String?
+  coverImageUrl        String?
+  metadataSource       String?
+  deweyReasoning       String?
+  language             String?
+  reviewedBy           String?
+  reviewedAt           DateTime?
+  createdBookId        String?
+  createdAt            DateTime        @default(now())
 }
 
 enum IngestionStatus {
@@ -119,4 +140,6 @@ enum IngestionStatus {
   PROCESSING
   COMPLETED
   FAILED
+  APPROVED
+  REJECTED
 }

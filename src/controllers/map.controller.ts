@@ -7,7 +7,10 @@ import {
   parseShelfSectionPayload,
   parseShelfSectionPartial,
   updateShelfSection,
+  getBookCopiesByShelf,
+  syncMapLayout,
 } from '../services/map.service';
+import { AppError } from '../lib/errors';
 
 export async function listSections(_req: Request, res: Response) {
   const data = await listShelfSections();
@@ -34,4 +37,19 @@ export async function updateSection(req: Request, res: Response) {
 export async function deleteSection(req: Request, res: Response) {
   await deleteShelfSection(req.params.id);
   res.status(204).send();
+}
+
+export async function listShelfBooks(req: Request, res: Response) {
+  const copies = await getBookCopiesByShelf(req.params.id);
+  res.json({ success: true, data: copies });
+}
+
+export async function saveLayout(req: Request, res: Response) {
+  const sections = req.body;
+  if (!Array.isArray(sections)) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Request body must be an array of sections.');
+  }
+
+  const result = await syncMapLayout(sections);
+  res.json({ success: true, data: result });
 }

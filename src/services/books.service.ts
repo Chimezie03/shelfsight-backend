@@ -1,6 +1,8 @@
-import type { Book, BookCopy } from '@prisma/client';
+import type { Book, BookCopy, ShelfSection } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { AppError } from '../lib/errors';
+
+type CopyWithShelf = BookCopy & { shelf: ShelfSection | null };
 
 interface FetchBooksParams {
   title?: string;
@@ -21,7 +23,11 @@ const bookPayload = (data: any) => ({
 });
 
 /** Matches list-item shape expected by frontend `BackendBook` / catalog transforms. */
-export function mapBookWithCopies(book: Book & { copies: BookCopy[] }) {
+export function mapBookWithCopies(book: Book & { copies: CopyWithShelf[] }) {
+  // Find the first copy that has a shelf assigned to derive location
+  const shelfCopy = book.copies.find((c) => c.shelf);
+  const shelf = shelfCopy?.shelf ?? null;
+
   return {
     id: book.id,
     title: book.title,
@@ -35,6 +41,8 @@ export function mapBookWithCopies(book: Book & { copies: BookCopy[] }) {
     totalCopies: book.copies.length,
     availableCopyIds: book.copies.filter((c) => c.status === 'AVAILABLE').map((c) => c.id),
     createdAt: book.createdAt,
+    shelfId: shelf?.id ?? null,
+    shelfLabel: shelf?.label ?? null,
   };
 }
 
@@ -96,7 +104,7 @@ export async function fetchBooks(params: FetchBooksParams) {
     take: limit,
     orderBy: { createdAt: 'desc' },
     include: {
-      copies: true,
+      copies: { include: { shelf: true } },
     },
   });
 
@@ -114,7 +122,7 @@ export async function fetchBooks(params: FetchBooksParams) {
 export async function fetchBookById(id: string) {
   const book = await prisma.book.findUnique({
     where: { id },
-    include: { copies: true },
+    include: { copies: { include: { shelf: true } } },
   });
   if (!book) {
     throw new AppError(404, 'BOOK_NOT_FOUND', 'Book not found');
