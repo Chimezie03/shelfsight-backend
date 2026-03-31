@@ -38,15 +38,15 @@ async function main() {
 
   console.log('Seeding Shelf Sections...');
   const shelvesData = [
-    { label: 'Fiction A–F', mapX: 1, mapY: 1, width: 4, height: 2, floor: 1 },
-    { label: 'Fiction G–M', mapX: 6, mapY: 1, width: 4, height: 2, floor: 1 },
-    { label: 'Fiction N–Z', mapX: 11, mapY: 1, width: 4, height: 2, floor: 1 },
-    { label: 'Science', mapX: 1, mapY: 4, width: 6, height: 2, floor: 1 },
-    { label: 'History & Geo', mapX: 8, mapY: 4, width: 6, height: 2, floor: 1 },
-    { label: 'Technology', mapX: 1, mapY: 7, width: 5, height: 2, floor: 1 },
-    { label: 'Arts & Rec', mapX: 7, mapY: 7, width: 5, height: 2, floor: 1 },
-    { label: 'Philosophy', mapX: 13, mapY: 7, width: 4, height: 2, floor: 1 },
-    { label: 'New Arrivals', mapX: 1, mapY: 10, width: 5, height: 2, floor: 1 },
+    { label: 'Fiction A–F',   mapX: 60,  mapY: 40,  width: 260, height: 90, floor: 1, shelfType: 'single-shelf', category: 'Fiction',        deweyRangeStart: '800', deweyRangeEnd: '833', color: '#1B2A4A', numberOfTiers: 4, capacityPerTier: 30, sectionCode: 'F-1' },
+    { label: 'Fiction G–M',   mapX: 350, mapY: 40,  width: 260, height: 90, floor: 1, shelfType: 'single-shelf', category: 'Fiction',        deweyRangeStart: '834', deweyRangeEnd: '866', color: '#1B2A4A', numberOfTiers: 4, capacityPerTier: 30, sectionCode: 'F-2' },
+    { label: 'Fiction N–Z',   mapX: 640, mapY: 40,  width: 260, height: 90, floor: 1, shelfType: 'single-shelf', category: 'Fiction',        deweyRangeStart: '867', deweyRangeEnd: '899', color: '#1B2A4A', numberOfTiers: 4, capacityPerTier: 30, sectionCode: 'F-3' },
+    { label: 'Science',       mapX: 60,  mapY: 180, width: 300, height: 100, floor: 1, shelfType: 'double-shelf', category: 'Science',       deweyRangeStart: '500', deweyRangeEnd: '599', color: '#3D8B7A', numberOfTiers: 6, capacityPerTier: 40, sectionCode: 'S-1' },
+    { label: 'History & Geo', mapX: 400, mapY: 180, width: 300, height: 100, floor: 1, shelfType: 'double-shelf', category: 'History',       deweyRangeStart: '900', deweyRangeEnd: '999', color: '#C4956A', numberOfTiers: 6, capacityPerTier: 40, sectionCode: 'H-1' },
+    { label: 'Technology',    mapX: 60,  mapY: 330, width: 280, height: 90, floor: 1, shelfType: 'single-shelf', category: 'Non-Fiction',    deweyRangeStart: '600', deweyRangeEnd: '699', color: '#64748B', numberOfTiers: 5, capacityPerTier: 35, sectionCode: 'T-1' },
+    { label: 'Arts & Rec',    mapX: 380, mapY: 330, width: 280, height: 90, floor: 1, shelfType: 'single-shelf', category: 'Non-Fiction',    deweyRangeStart: '700', deweyRangeEnd: '799', color: '#8B6BB5', numberOfTiers: 5, capacityPerTier: 35, sectionCode: 'A-1' },
+    { label: 'Philosophy',    mapX: 700, mapY: 330, width: 220, height: 90, floor: 1, shelfType: 'single-shelf', category: 'Non-Fiction',    deweyRangeStart: '100', deweyRangeEnd: '199', color: '#D4A026', numberOfTiers: 4, capacityPerTier: 30, sectionCode: 'P-1' },
+    { label: 'New Arrivals',  mapX: 60,  mapY: 480, width: 240, height: 80, floor: 1, shelfType: 'display-table', category: 'Uncategorized', deweyRangeStart: '000', deweyRangeEnd: '999', color: '#C4454D', numberOfTiers: 2, capacityPerTier: 20, sectionCode: 'N-1' },
   ];
   const shelves = [];
   for (const s of shelvesData) {

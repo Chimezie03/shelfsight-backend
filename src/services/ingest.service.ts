@@ -5,6 +5,9 @@ import {
   DetectDocumentTextCommand,
 } from '@aws-sdk/client-textract';
 import OpenAI from 'openai';
+import prisma from '../lib/prisma';
+import { AppError } from '../lib/errors';
+import type { IngestionStatus } from '@prisma/client';
 const fetch = require('node-fetch');
 (globalThis as any).fetch = fetch;
 
@@ -370,4 +373,230 @@ export async function classifyDeweyDecimal(
       reasoning: `LLM error: ${err.message}`,
     };
   }
+}
+
+// ---------------------------------------------------------------------------
+// 5. OCR-based metadata extraction for no-ISBN books
+// ---------------------------------------------------------------------------
+
+export interface OcrMetadataResult {
+  title: string | null;
+  author: string | null;
+  language: string | null;
+  subjects: string[];
+  dewey_class: string | null;
+  confidence_score: number;
+  reasoning: string | null;
+}
+
+/**
+ * When no ISBN is detected from OCR text (common for non-English books or
+ * books without a visible ISBN), sends the raw OCR text to OpenAI to extract
+ * metadata directly. Handles books in any language.
+ */
+export async function extractMetadataFromOcr(
+  ocrText: string,
+): Promise<OcrMetadataResult> {
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn('[ingest] OPENAI_API_KEY not set – returning stub OCR metadata.');
+    return {
+      title: null,
+      author: null,
+      language: null,
+      subjects: [],
+      dewey_class: null,
+      confidence_score: 0,
+      reasoning: 'LLM unavailable (no API key configured).',
+    };
+  }
+
+  if (!ocrText.trim()) {
+    return {
+      title: null,
+      author: null,
+      language: null,
+      subjects: [],
+      dewey_class: null,
+      confidence_score: 0,
+      reasoning: 'No OCR text available for analysis.',
+    };
+  }
+
+  const systemPrompt =
+    `You are a multilingual librarian assistant. You can identify books from any language. ` +
+    `Given OCR text extracted from a book cover or spine, extract the metadata and suggest ` +
+    `a Dewey Decimal classification. Respond ONLY with valid JSON — no markdown, no extra keys.`;
+
+  const userPrompt =
+    `The following text was OCR-extracted from a book cover or spine. The book may be in any language.\n\n` +
+    `OCR Text:\n${ocrText}\n\n` +
+    `Extract the following and return as JSON:\n` +
+    `- "title" (string or null): the book title\n` +
+    `- "author" (string or null): the author name(s)\n` +
+    `- "language" (string or null): the detected language (e.g. "English", "Spanish", "Arabic", "Japanese")\n` +
+    `- "subjects" (string[]): subject categories\n` +
+    `- "dewey_class" (string or null): suggested Dewey Decimal classification\n` +
+    `- "confidence_score" (integer 0-100): how confident you are in this classification\n` +
+    `- "reasoning" (string): brief explanation`;
+
+  try {
+    const chat = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4o',
+      temperature: 0.2,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      response_format: { type: 'json_object' },
+    });
+
+    const raw = chat.choices[0]?.message?.content ?? '{}';
+    const parsed = JSON.parse(raw) as Record<string, any>;
+
+    return {
+      title: parsed.title ?? null,
+      author: parsed.author ?? null,
+      language: parsed.language ?? null,
+      subjects: Array.isArray(parsed.subjects) ? parsed.subjects : [],
+      dewey_class: parsed.dewey_class ?? null,
+      confidence_score:
+        typeof parsed.confidence_score === 'number'
+          ? Math.min(100, Math.max(0, Math.round(parsed.confidence_score)))
+          : 0,
+      reasoning: parsed.reasoning ?? null,
+    };
+  } catch (err: any) {
+    console.error('[ingest] OpenAI OCR metadata error:', err.message);
+    return {
+      title: null,
+      author: null,
+      language: null,
+      subjects: [],
+      dewey_class: null,
+      confidence_score: 0,
+      reasoning: `LLM error: ${err.message}`,
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 6. IngestionJob management
+// ---------------------------------------------------------------------------
+
+export async function listIngestionJobs(filters: {
+  status?: IngestionStatus;
+  page?: number;
+  limit?: number;
+}) {
+  const page = filters.page ?? 1;
+  const limit = filters.limit ?? 20;
+  const skip = (page - 1) * limit;
+
+  const where = filters.status ? { status: filters.status } : {};
+
+  const [jobs, total] = await Promise.all([
+    prisma.ingestionJob.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
+    }),
+    prisma.ingestionJob.count({ where }),
+  ]);
+
+  return { jobs, total, page, limit };
+}
+
+export async function getIngestionJobById(id: string) {
+  const job = await prisma.ingestionJob.findUnique({ where: { id } });
+  if (!job) {
+    throw new AppError(404, 'NOT_FOUND', `Ingestion job ${id} not found.`);
+  }
+  return job;
+}
+
+export async function approveIngestionJob(
+  id: string,
+  overrides: {
+    title: string;
+    author: string;
+    isbn: string;
+    genre?: string;
+    deweyDecimal?: string;
+    coverImageUrl?: string;
+    publishYear?: string;
+  },
+  reviewedBy: string,
+) {
+  const job = await prisma.ingestionJob.findUnique({ where: { id } });
+  if (!job) {
+    throw new AppError(404, 'NOT_FOUND', `Ingestion job ${id} not found.`);
+  }
+  if (job.status !== 'COMPLETED') {
+    throw new AppError(
+      400,
+      'INVALID_STATUS',
+      `Job must be in COMPLETED status to approve. Current: ${job.status}`,
+    );
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const book = await tx.book.create({
+      data: {
+        title: overrides.title,
+        author: overrides.author,
+        isbn: overrides.isbn,
+        genre: overrides.genre || null,
+        deweyDecimal: overrides.deweyDecimal || null,
+        coverImageUrl: overrides.coverImageUrl || null,
+        publishYear: overrides.publishYear || null,
+      },
+    });
+
+    const barcode = `BC-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    await tx.bookCopy.create({
+      data: {
+        bookId: book.id,
+        barcode,
+        status: 'PROCESSING',
+      },
+    });
+
+    const updatedJob = await tx.ingestionJob.update({
+      where: { id },
+      data: {
+        status: 'APPROVED',
+        reviewedBy,
+        reviewedAt: new Date(),
+        createdBookId: book.id,
+      },
+    });
+
+    return { job: updatedJob, book };
+  });
+
+  return result;
+}
+
+export async function rejectIngestionJob(id: string, reviewedBy: string) {
+  const job = await prisma.ingestionJob.findUnique({ where: { id } });
+  if (!job) {
+    throw new AppError(404, 'NOT_FOUND', `Ingestion job ${id} not found.`);
+  }
+  if (job.status !== 'COMPLETED') {
+    throw new AppError(
+      400,
+      'INVALID_STATUS',
+      `Job must be in COMPLETED status to reject. Current: ${job.status}`,
+    );
+  }
+
+  return prisma.ingestionJob.update({
+    where: { id },
+    data: {
+      status: 'REJECTED',
+      reviewedBy,
+      reviewedAt: new Date(),
+    },
+  });
 }
