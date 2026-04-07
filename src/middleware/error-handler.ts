@@ -5,6 +5,7 @@ import {
   PrismaClientValidationError,
 } from '@prisma/client/runtime/library';
 import { AppError } from '../lib/errors';
+import { logError } from '../lib/logger';
 
 export function buildErrorBody(
   statusCode: number,
@@ -28,10 +29,16 @@ export function buildErrorBody(
   };
 }
 
-function logErrorInDevelopment(err: unknown): void {
-  if (process.env.NODE_ENV === 'production') return;
-  // ARCH DECISION: stderr in non-production only; spec forbids console.log in production paths
-  // eslint-disable-next-line no-console
+function logErrorForEnv(err: unknown, httpContext: { path: string; statusCode: number; code: string }): void {
+  if (process.env.NODE_ENV === 'production') {
+    logError(err, {
+      event: 'http_error_response',
+      path: httpContext.path,
+      statusCode: httpContext.statusCode,
+      code: httpContext.code,
+    });
+    return;
+  }
   console.error(err);
 }
 
@@ -127,7 +134,7 @@ export const errorHandler: ErrorRequestHandler = (
         : err.message;
   }
 
-  logErrorInDevelopment(err);
+  logErrorForEnv(err, { path: req.path, statusCode, code });
 
   res.status(statusCode).json(buildErrorBody(statusCode, code, message, details, req.path));
 };
