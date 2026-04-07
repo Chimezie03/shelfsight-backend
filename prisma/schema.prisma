@@ -33,6 +33,7 @@ model Book {
   deweyDecimal  String?
   coverImageUrl String?
   publishYear   String?
+  pageCount     Int?
   createdAt     DateTime    @default(now())
   copies        BookCopy[]
 }

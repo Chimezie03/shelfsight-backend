@@ -20,6 +20,7 @@ const bookPayload = (data: any) => ({
   deweyDecimal: data.deweyDecimal,
   coverImageUrl: data.coverImageUrl,
   publishYear: data.publishYear ?? data.publishDate ?? undefined,
+  pageCount: data.pageCount != null ? (parseInt(data.pageCount) || null) : undefined,
 });
 
 /** Matches list-item shape expected by frontend `BackendBook` / catalog transforms. */
@@ -37,6 +38,7 @@ export function mapBookWithCopies(book: Book & { copies: CopyWithShelf[] }) {
     deweyDecimal: book.deweyDecimal,
     coverImageUrl: book.coverImageUrl,
     publishYear: book.publishYear,
+    pageCount: book.pageCount ?? null,
     availableCopies: book.copies.filter((c) => c.status === 'AVAILABLE').length,
     totalCopies: book.copies.length,
     availableCopyIds: book.copies.filter((c) => c.status === 'AVAILABLE').map((c) => c.id),
@@ -115,18 +117,48 @@ export async function updateBookService(id: string, data: any) {
     }
   }
 
-  const book = await prisma.book.update({
-    where: { id },
-    data: {
-      title: data.title,
-      author: data.author,
-      isbn: data.isbn,
-      genre: data.genre,
-      deweyDecimal: data.deweyDecimal,
-      coverImageUrl: data.coverImageUrl,
-      publishYear: data.publishYear ?? data.publishDate ?? undefined,
-    },
-    include: { copies: { include: { shelf: true } } },
+  const book = await prisma.$transaction(async (tx) => {
+    const updated = await tx.book.update({
+      where: { id },
+      data: bookPayload(data),
+      include: { copies: { include: { shelf: true } } },
+    });
+
+    // Handle copies count change if provided
+    if (data.copies != null) {
+      const desiredCount = Math.max(0, parseInt(data.copies) || 0);
+      const currentCopies = updated.copies;
+      const currentCount = currentCopies.length;
+
+      if (desiredCount > currentCount) {
+        // Add new copies
+        const toAdd = desiredCount - currentCount;
+        const cleanIsbn = String(updated.isbn).replace(/-/g, '');
+        const ts = Date.now();
+        await tx.bookCopy.createMany({
+          data: Array.from({ length: toAdd }, (_, i) => ({
+            bookId: id,
+            barcode: `${cleanIsbn}-${ts}-${i + 1}`,
+            status: 'AVAILABLE' as const,
+          })),
+        });
+      } else if (desiredCount < currentCount) {
+        // Remove excess copies — prefer AVAILABLE ones, never remove CHECKED_OUT
+        const available = currentCopies.filter((c) => c.status === 'AVAILABLE');
+        const toRemove = currentCount - desiredCount;
+        const removable = available.slice(0, toRemove);
+        if (removable.length > 0) {
+          await tx.bookCopy.deleteMany({
+            where: { id: { in: removable.map((c) => c.id) } },
+          });
+        }
+      }
+    }
+
+    return tx.book.findUniqueOrThrow({
+      where: { id },
+      include: { copies: { include: { shelf: true } } },
+    });
   });
 
   return mapBookWithCopies(book);
