@@ -222,6 +222,23 @@ function matchesYearFilter(publishYear: string | null, yearMin?: number, yearMax
   return true;
 }
 
+function buildDbOrderBy(
+  sortField: CatalogSortField | null,
+  direction: SortDirection,
+): Prisma.BookOrderByWithRelationInput[] {
+  if (sortField === 'title') {
+    return [{ title: direction }, { createdAt: 'desc' }];
+  }
+  if (sortField === 'author') {
+    return [{ author: direction }, { createdAt: 'desc' }];
+  }
+  if (sortField === 'publishYear') {
+    return [{ publishYear: direction }, { createdAt: 'desc' }];
+  }
+
+  return [{ createdAt: direction }];
+}
+
 export async function createBookService(data: any) {
   const fieldErrors: Record<string, string> = {};
   if (!data.title) fieldErrors.title = 'Required';
@@ -372,6 +389,9 @@ export async function fetchBooks(params: FetchBooksParams) {
 
   const safePage = Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1;
   const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 20;
+  const normalizedStatus = normalizeStatus(status);
+  const normalizedSortField = normalizeSortField(sortBy);
+  const normalizedSortDirection = normalizeSortDirection(sortDir);
 
   const whereClauses: Prisma.BookWhereInput[] = [];
 
@@ -405,6 +425,39 @@ export async function fetchBooks(params: FetchBooksParams) {
 
   const where: Prisma.BookWhereInput = whereClauses.length > 0 ? { AND: whereClauses } : {};
 
+  const requiresInMemoryPass =
+    Boolean(category && category !== 'all') ||
+    normalizedStatus !== null ||
+    Number.isFinite(yearMin) ||
+    Number.isFinite(yearMax) ||
+    normalizedSortField === 'dewey' ||
+    normalizedSortField === 'status';
+
+  if (!requiresInMemoryPass) {
+    const [total, books] = await Promise.all([
+      prisma.book.count({ where }),
+      prisma.book.findMany({
+        where,
+        skip: (safePage - 1) * safeLimit,
+        take: safeLimit,
+        orderBy: buildDbOrderBy(normalizedSortField, normalizedSortDirection),
+        include: {
+          copies: { include: { shelf: true } },
+        },
+      }),
+    ]);
+
+    return {
+      data: books.map(mapBookWithCopies),
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        totalPages: total === 0 ? 0 : Math.ceil(total / safeLimit),
+      },
+    };
+  }
+
   const books = await prisma.book.findMany({
     where,
     orderBy: { createdAt: 'desc' },
@@ -419,7 +472,6 @@ export async function fetchBooks(params: FetchBooksParams) {
     filtered = filtered.filter((book) => matchesCategoryFilter(book, category));
   }
 
-  const normalizedStatus = normalizeStatus(status);
   if (normalizedStatus) {
     filtered = filtered.filter((book) => toCatalogStatus(book) === normalizedStatus);
   }
@@ -428,9 +480,8 @@ export async function fetchBooks(params: FetchBooksParams) {
     filtered = filtered.filter((book) => matchesYearFilter(book.publishYear, yearMin, yearMax));
   }
 
-  const normalizedSortField = normalizeSortField(sortBy);
   if (normalizedSortField) {
-    const direction = normalizeSortDirection(sortDir);
+    const direction = normalizedSortDirection;
 
     filtered = [...filtered].sort((a, b) => {
       if (normalizedSortField === 'title') {

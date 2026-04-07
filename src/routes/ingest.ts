@@ -4,6 +4,7 @@ import { wrapAsync } from '../lib/async-handler';
 import { requireAuth, requireRole } from '../middleware/auth.middleware';
 import {
   analyzeBookImage,
+  analyzeBookImagesBatch,
   lookupBookByIsbn,
   listJobs,
   getJob,
@@ -19,6 +20,17 @@ const upload = multer({
 });
 
 router.get('/lookup', requireAuth, requireRole('ADMIN', 'STAFF'), wrapAsync(lookupBookByIsbn));
+
+router.post(
+  '/analyze/batch',
+  requireAuth,
+  requireRole('ADMIN', 'STAFF'),
+  upload.fields([
+    { name: 'images', maxCount: 20 },
+    { name: 'image', maxCount: 20 },
+  ]),
+  wrapAsync(analyzeBookImagesBatch),
+);
 
 router.post('/analyze', requireAuth, requireRole('ADMIN', 'STAFF'), upload.single('image'), wrapAsync(analyzeBookImage));
 

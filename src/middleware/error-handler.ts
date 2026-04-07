@@ -1,4 +1,5 @@
 import type { ErrorRequestHandler, Request } from 'express';
+import multer from 'multer';
 import {
   PrismaClientKnownRequestError,
   PrismaClientValidationError,
@@ -82,6 +83,23 @@ export const errorHandler: ErrorRequestHandler = (
     statusCode = 400;
     code = 'VALIDATION_ERROR';
     message = 'Invalid data for database operation';
+  } else if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      statusCode = 413;
+      code = 'PAYLOAD_TOO_LARGE';
+      message = 'Uploaded file exceeds the maximum allowed size of 10 MB';
+      details = { field: err.field ?? null, maxSizeBytes: 10 * 1024 * 1024 };
+    } else if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+      statusCode = 400;
+      code = 'VALIDATION_ERROR';
+      message = 'Unexpected upload field';
+      details = { field: err.field ?? null };
+    } else {
+      statusCode = 400;
+      code = 'UPLOAD_ERROR';
+      message = 'File upload failed';
+      details = { multerCode: err.code, field: err.field ?? null };
+    }
   } else if (err instanceof SyntaxError && 'body' in err) {
     statusCode = 400;
     code = 'INVALID_JSON';

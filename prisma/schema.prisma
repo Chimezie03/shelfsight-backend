@@ -37,6 +37,9 @@ model Book {
   pageCount     Int?
   createdAt     DateTime    @default(now())
   copies        BookCopy[]
+
+  @@index([createdAt])
+  @@index([language])
 }
 
 model BookCopy {
@@ -49,6 +52,9 @@ model BookCopy {
   shelfId   String?
   loans     Loan[]
   events    BookCopyEvent[]
+
+  @@index([bookId])
+  @@index([shelfId])
 }
 
 enum CopyStatus {
@@ -91,6 +97,10 @@ model Loan {
   dueDate      DateTime
   returnedAt   DateTime?
   fineAmount   Float      @default(0)
+
+  @@index([userId, checkedOutAt])
+  @@index([bookCopyId, returnedAt])
+  @@index([returnedAt, dueDate])
 }
 
 model ShelfSection {
@@ -135,6 +145,9 @@ model IngestionJob {
   reviewedAt           DateTime?
   createdBookId        String?
   createdAt            DateTime        @default(now())
+
+  @@index([createdAt])
+  @@index([status, createdAt])
 }
 
 enum IngestionStatus {
