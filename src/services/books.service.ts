@@ -165,8 +165,22 @@ export async function updateBookService(id: string, data: any) {
 }
 
 export async function deleteBookService(id: string) {
-  return await prisma.book.delete({
-    where: { id },
+  return await prisma.$transaction(async (tx) => {
+    // Fetch all copy IDs for this book
+    const copies = await tx.bookCopy.findMany({
+      where: { bookId: id },
+      select: { id: true },
+    });
+    const copyIds = copies.map((c) => c.id);
+
+    // Delete dependents of each copy first
+    if (copyIds.length > 0) {
+      await tx.bookCopyEvent.deleteMany({ where: { bookCopyId: { in: copyIds } } });
+      await tx.loan.deleteMany({ where: { bookCopyId: { in: copyIds } } });
+      await tx.bookCopy.deleteMany({ where: { bookId: id } });
+    }
+
+    return tx.book.delete({ where: { id } });
   });
 }
 
