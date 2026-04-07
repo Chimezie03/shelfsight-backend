@@ -315,6 +315,14 @@ export async function updateBookService(id: string, data: any) {
       }
     }
 
+    // If a shelfId was provided, assign all AVAILABLE copies to that shelf
+    if (data.shelfId) {
+      await tx.bookCopy.updateMany({
+        where: { bookId: id, status: 'AVAILABLE' },
+        data: { shelfId: data.shelfId },
+      });
+    }
+
     return tx.book.findUniqueOrThrow({
       where: { id },
       include: { copies: { include: { shelf: true } } },
