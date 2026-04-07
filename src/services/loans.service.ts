@@ -1,4 +1,5 @@
 import prisma from '../lib/prisma';
+import { AppError } from '../lib/errors';
 
 const DEFAULT_LOAN_DAYS = 14;
 const FINE_PER_DAY = 0.25;
@@ -12,9 +13,9 @@ interface FetchLoansParams {
 
 export async function checkoutService(userId: string, bookCopyId: string, dueDays?: number) {
   const copy = await prisma.bookCopy.findUnique({ where: { id: bookCopyId } });
-  if (!copy) throw Object.assign(new Error('Book copy not found'), { code: 'NOT_FOUND' });
+  if (!copy) throw new AppError(404, 'NOT_FOUND', 'Book copy not found');
   if (copy.status !== 'AVAILABLE') {
-    throw Object.assign(new Error('Book copy is not available for checkout'), { code: 'UNAVAILABLE' });
+    throw new AppError(409, 'RESOURCE_UNAVAILABLE', 'Book copy is not available for checkout');
   }
 
   const dueDate = new Date();
@@ -42,8 +43,8 @@ export async function checkoutService(userId: string, bookCopyId: string, dueDay
 
 export async function checkinService(loanId: string) {
   const loan = await prisma.loan.findUnique({ where: { id: loanId } });
-  if (!loan) throw Object.assign(new Error('Loan not found'), { code: 'NOT_FOUND' });
-  if (loan.returnedAt) throw Object.assign(new Error('Loan already returned'), { code: 'ALREADY_RETURNED' });
+  if (!loan) throw new AppError(404, 'NOT_FOUND', 'Loan not found');
+  if (loan.returnedAt) throw new AppError(409, 'ALREADY_RETURNED', 'Loan already returned');
 
   const now = new Date();
   let fineAmount = 0;
@@ -100,13 +101,13 @@ export async function getBookCopyLocation(bookCopyId: string) {
 
 export async function shelveBookCopy(bookCopyId: string, shelfId: string, userId: string) {
   const copy = await prisma.bookCopy.findUnique({ where: { id: bookCopyId } });
-  if (!copy) throw Object.assign(new Error('Book copy not found'), { code: 'NOT_FOUND' });
+  if (!copy) throw new AppError(404, 'NOT_FOUND', 'Book copy not found');
   if (copy.status === 'CHECKED_OUT') {
-    throw Object.assign(new Error('Cannot shelve a checked-out copy'), { code: 'UNAVAILABLE' });
+    throw new AppError(409, 'RESOURCE_UNAVAILABLE', 'Cannot shelve a checked-out copy');
   }
 
   const shelf = await prisma.shelfSection.findUnique({ where: { id: shelfId } });
-  if (!shelf) throw Object.assign(new Error('Shelf section not found'), { code: 'NOT_FOUND' });
+  if (!shelf) throw new AppError(404, 'NOT_FOUND', 'Shelf section not found');
 
   const eventType = copy.shelfId ? 'MOVED' : 'SHELVED';
 
@@ -129,7 +130,7 @@ export async function shelveBookCopy(bookCopyId: string, shelfId: string, userId
 
 export async function getBookCopyHistory(bookCopyId: string, page = 1, limit = 20) {
   const copy = await prisma.bookCopy.findUnique({ where: { id: bookCopyId } });
-  if (!copy) throw Object.assign(new Error('Book copy not found'), { code: 'NOT_FOUND' });
+  if (!copy) throw new AppError(404, 'NOT_FOUND', 'Book copy not found');
 
   const total = await prisma.bookCopyEvent.count({ where: { bookCopyId } });
   const events = await prisma.bookCopyEvent.findMany({

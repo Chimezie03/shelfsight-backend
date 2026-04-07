@@ -27,14 +27,6 @@ export function buildErrorBody(
   };
 }
 
-const LOAN_SERVICE_CODES = new Set(['NOT_FOUND', 'UNAVAILABLE', 'ALREADY_RETURNED']);
-
-function isLoanServiceError(err: unknown): err is Error & { code: string } {
-  if (!(err instanceof Error)) return false;
-  const c = (err as Error & { code?: string }).code;
-  return typeof c === 'string' && LOAN_SERVICE_CODES.has(c);
-}
-
 function logErrorInDevelopment(err: unknown): void {
   if (process.env.NODE_ENV === 'production') return;
   // ARCH DECISION: stderr in non-production only; spec forbids console.log in production paths
@@ -109,26 +101,6 @@ export const errorHandler: ErrorRequestHandler = (
         code = 'REQUEST_ERROR';
       }
       message = err.message;
-    }
-  } else if (isLoanServiceError(err)) {
-    switch (err.code) {
-      case 'NOT_FOUND':
-        statusCode = 404;
-        code = 'NOT_FOUND';
-        message = err.message;
-        break;
-      case 'UNAVAILABLE':
-        statusCode = 409;
-        code = 'RESOURCE_UNAVAILABLE';
-        message = err.message;
-        break;
-      case 'ALREADY_RETURNED':
-        statusCode = 409;
-        code = 'ALREADY_RETURNED';
-        message = err.message;
-        break;
-      default:
-        break;
     }
   } else if (err instanceof Error) {
     message =
