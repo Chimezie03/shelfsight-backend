@@ -525,6 +525,7 @@ export async function approveIngestionJob(
     deweyDecimal?: string;
     coverImageUrl?: string;
     publishYear?: string;
+    language?: string;
   },
   reviewedBy: string,
 ) {
@@ -548,6 +549,7 @@ export async function approveIngestionJob(
         isbn: overrides.isbn,
         genre: overrides.genre || null,
         deweyDecimal: overrides.deweyDecimal || null,
+        language: overrides.language || job.language || 'English',
         coverImageUrl: overrides.coverImageUrl || null,
         publishYear: overrides.publishYear || null,
       },

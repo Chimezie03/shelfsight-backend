@@ -190,7 +190,8 @@ export async function getJob(req: Request, res: Response) {
 }
 
 export async function approveJob(req: Request, res: Response) {
-  const { title, author, isbn, genre, deweyDecimal, coverImageUrl, publishYear } = req.body;
+  const { title, author, isbn, genre, deweyDecimal, coverImageUrl, publishYear, language } =
+    req.body;
 
   if (!title || !author || !isbn) {
     throw new AppError(400, 'VALIDATION_ERROR', 'title, author, and isbn are required.', {
@@ -205,7 +206,7 @@ export async function approveJob(req: Request, res: Response) {
   const reviewedBy = (req as any).user?.userId || 'unknown';
   const result = await approveIngestionJob(
     req.params.id,
-    { title, author, isbn, genre, deweyDecimal, coverImageUrl, publishYear },
+    { title, author, isbn, genre, deweyDecimal, coverImageUrl, publishYear, language },
     reviewedBy,
   );
 

@@ -31,6 +31,7 @@ model Book {
   isbn          String      @unique
   genre         String?
   deweyDecimal  String?
+  language      String      @default("English")
   coverImageUrl String?
   publishYear   String?
   createdAt     DateTime    @default(now())
