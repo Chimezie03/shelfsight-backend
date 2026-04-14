@@ -7,8 +7,37 @@ const FINE_PER_DAY = 0.25;
 interface FetchLoansParams {
   userId?: string;
   status?: 'active' | 'returned' | 'overdue';
+  search?: string;
   page?: number;
   limit?: number;
+}
+
+function mapLoanResponse(loan: any) {
+  const mappedBook = {
+    id: loan.bookCopy.book.id,
+    title: loan.bookCopy.book.title,
+    author: loan.bookCopy.book.author,
+    isbn: loan.bookCopy.book.isbn,
+  };
+
+  return {
+    id: loan.id,
+    user: loan.user,
+    member: loan.user,
+    book: mappedBook,
+    bookCopy: {
+      id: loan.bookCopy.id,
+      barcode: loan.bookCopy.barcode,
+      book: mappedBook,
+    },
+    checkedOutAt: loan.checkedOutAt,
+    checkoutDate: loan.checkedOutAt,
+    dueDate: loan.dueDate,
+    returnedAt: loan.returnedAt,
+    returnDate: loan.returnedAt,
+    fineAmount: loan.fineAmount,
+    isOverdue: !loan.returnedAt && loan.dueDate < new Date(),
+  };
 }
 
 export async function checkoutService(userId: string, bookCopyId: string, dueDays?: number) {
@@ -26,7 +55,11 @@ export async function checkoutService(userId: string, bookCopyId: string, dueDay
       data: { userId, bookCopyId, dueDate },
       include: {
         user: { select: { id: true, name: true, email: true } },
-        bookCopy: { include: { book: { select: { id: true, title: true, author: true } } } },
+        bookCopy: {
+          include: {
+            book: { select: { id: true, title: true, author: true, isbn: true } },
+          },
+        },
       },
     }),
     prisma.bookCopy.update({
@@ -38,7 +71,7 @@ export async function checkoutService(userId: string, bookCopyId: string, dueDay
     }),
   ]);
 
-  return loan;
+  return mapLoanResponse(loan);
 }
 
 export async function checkinService(loanId: string) {
@@ -59,7 +92,11 @@ export async function checkinService(loanId: string) {
       data: { returnedAt: now, fineAmount },
       include: {
         user: { select: { id: true, name: true, email: true } },
-        bookCopy: { include: { book: { select: { id: true, title: true, author: true } } } },
+        bookCopy: {
+          include: {
+            book: { select: { id: true, title: true, author: true, isbn: true } },
+          },
+        },
       },
     }),
     prisma.bookCopy.update({
@@ -71,7 +108,7 @@ export async function checkinService(loanId: string) {
     }),
   ]);
 
-  return updated;
+  return mapLoanResponse(updated);
 }
 
 export async function getBookCopyLocation(bookCopyId: string) {
@@ -147,19 +184,37 @@ export async function getBookCopyHistory(bookCopyId: string, page = 1, limit = 2
 }
 
 export async function fetchLoans(params: FetchLoansParams) {
-  const { userId, status, page = 1, limit = 20 } = params;
-  const where: any = {};
+  const { userId, status, search, page = 1, limit = 20 } = params;
+  const whereAnd: any[] = [];
 
-  if (userId) where.userId = userId;
+  if (userId) {
+    whereAnd.push({ userId });
+  }
 
   if (status === 'active') {
-    where.returnedAt = null;
+    whereAnd.push({ returnedAt: null });
   } else if (status === 'returned') {
-    where.returnedAt = { not: null };
+    whereAnd.push({ returnedAt: { not: null } });
   } else if (status === 'overdue') {
-    where.returnedAt = null;
-    where.dueDate = { lt: new Date() };
+    whereAnd.push({ returnedAt: null });
+    whereAnd.push({ dueDate: { lt: new Date() } });
   }
+
+  const normalizedSearch = search?.trim();
+  if (normalizedSearch) {
+    whereAnd.push({
+      OR: [
+        { user: { name: { contains: normalizedSearch, mode: 'insensitive' } } },
+        { user: { email: { contains: normalizedSearch, mode: 'insensitive' } } },
+        { bookCopy: { barcode: { contains: normalizedSearch, mode: 'insensitive' } } },
+        { bookCopy: { book: { title: { contains: normalizedSearch, mode: 'insensitive' } } } },
+        { bookCopy: { book: { author: { contains: normalizedSearch, mode: 'insensitive' } } } },
+        { bookCopy: { book: { isbn: { contains: normalizedSearch, mode: 'insensitive' } } } },
+      ],
+    });
+  }
+
+  const where = whereAnd.length > 0 ? { AND: whereAnd } : {};
 
   const total = await prisma.loan.count({ where });
   const loans = await prisma.loan.findMany({
@@ -169,25 +224,16 @@ export async function fetchLoans(params: FetchLoansParams) {
     orderBy: { checkedOutAt: 'desc' },
     include: {
       user: { select: { id: true, name: true, email: true } },
-      bookCopy: { include: { book: { select: { id: true, title: true, author: true } } } },
+      bookCopy: {
+        include: {
+          book: { select: { id: true, title: true, author: true, isbn: true } },
+        },
+      },
     },
   });
 
   return {
-    data: loans.map((loan) => ({
-      id: loan.id,
-      user: loan.user,
-      bookCopy: {
-        id: loan.bookCopy.id,
-        barcode: loan.bookCopy.barcode,
-        book: loan.bookCopy.book,
-      },
-      checkedOutAt: loan.checkedOutAt,
-      dueDate: loan.dueDate,
-      returnedAt: loan.returnedAt,
-      fineAmount: loan.fineAmount,
-      isOverdue: !loan.returnedAt && loan.dueDate < new Date(),
-    })),
+    data: loans.map(mapLoanResponse),
     pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
   };
 }

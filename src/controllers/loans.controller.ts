@@ -41,11 +41,12 @@ export async function checkin(req: Request, res: Response) {
 }
 
 export async function getLoans(req: Request, res: Response) {
-  const { userId, status, page = 1, limit = 20 } = req.query;
+  const { userId, status, search, page = 1, limit = 20 } = req.query;
 
   const loans = await fetchLoans({
     userId: typeof userId === 'string' ? userId : undefined,
     status: typeof status === 'string' ? (status as 'active' | 'returned' | 'overdue') : undefined,
+    search: typeof search === 'string' ? search : undefined,
     page: Number(page),
     limit: Number(limit),
   });

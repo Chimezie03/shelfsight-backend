@@ -84,7 +84,7 @@ Schema at `prisma/schema.prisma`. Key models:
 | `POST` | `/users` | Admin | Create user |
 | `PUT` | `/users/:id` | Admin | Update user |
 | `DELETE` | `/users/:id` | Admin | Delete user |
-| `GET` | `/loans` | Yes | List loans (query: `status`, `userId`, `page`, `limit`) |
+| `GET` | `/loans` | Yes | List loans (query: `status`, `userId`, `search`, `page`, `limit`) |
 | `POST` | `/loans/checkout` | Yes | Check out a book copy |
 | `POST` | `/loans/checkin` | Yes | Return a book copy, calculate fines |
 | `POST` | `/ingest/analyze` | Yes | Upload image → AI metadata extraction |
