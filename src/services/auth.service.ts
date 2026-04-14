@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma';
+import { normalizeEmail } from '../lib/email';
 
 if (!process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET environment variable is required. Set it in your .env file.');
@@ -17,7 +18,8 @@ export interface AuthPayload {
 }
 
 export async function authenticateUser(email: string, password: string): Promise<{ token: string; user: AuthPayload }> {
-  const user = await prisma.user.findUnique({ where: { email } });
+  const normalizedEmail = normalizeEmail(email);
+  const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
 
   if (!user) {
     throw Object.assign(new Error('Invalid email or password'), { statusCode: 401, name: 'AuthenticationError' });
