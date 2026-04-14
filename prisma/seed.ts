@@ -1,4 +1,4 @@
-import { PrismaClient, Role, CopyStatus, CopyEventType } from '@prisma/client';
+import { PrismaClient, Role, CopyStatus, CopyEventType, FineStatus, TransactionType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
@@ -7,6 +7,8 @@ async function main() {
   const defaultPassword = await bcrypt.hash('password123', 12);
 
   console.log('Clearing existing data...');
+  await prisma.transactionLog.deleteMany();
+  await prisma.fine.deleteMany();
   await prisma.bookCopyEvent.deleteMany();
   await prisma.loan.deleteMany();
   await prisma.bookCopy.deleteMany();
@@ -171,14 +173,19 @@ async function main() {
     if (i % 3 === 0) {
       const copy = copies[0];
       const patron = patrons[i % patrons.length];
-      
+
       const checkoutDate = new Date();
       checkoutDate.setDate(checkoutDate.getDate() - 40);
       const dueDate = new Date(checkoutDate);
       dueDate.setDate(dueDate.getDate() + 14);
-      
+
+      // Alternate: some returned on time, some returned late
+      const isLateReturn = i % 6 === 0;
       const returnedDate = new Date(checkoutDate);
-      returnedDate.setDate(returnedDate.getDate() + 12);
+      returnedDate.setDate(returnedDate.getDate() + (isLateReturn ? 20 : 12));
+
+      const overdueDays = isLateReturn ? 6 : 0;
+      const fineAmt = overdueDays * 0.25;
 
       const loan = await prisma.loan.create({
         data: {
@@ -187,7 +194,7 @@ async function main() {
           checkedOutAt: checkoutDate,
           dueDate: dueDate,
           returnedAt: returnedDate,
-          fineAmount: 0
+          fineAmount: fineAmt
         }
       });
       loanCount++;
@@ -245,7 +252,142 @@ async function main() {
     await prisma.bookCopyEvent.create({ data: { bookCopyId: processingCopy.id, type: CopyEventType.MARKED_PROCESSING, userId: admin.id, createdAt: new Date() } });
   }
 
-  console.log(`Seeding complete. Created ${loanCount} loans.`);
+  // ── Seed Fines & Transaction Logs ──────────────────────────────────
+  console.log('Seeding Fines & Transaction Logs...');
+
+  // Find returned loans that were overdue (fineAmount > 0)
+  const overdueReturnedLoans = await prisma.loan.findMany({
+    where: { returnedAt: { not: null }, fineAmount: { gt: 0 } },
+    include: {
+      user: { select: { id: true, name: true, email: true } },
+      bookCopy: { include: { book: { select: { title: true } } } },
+    },
+  });
+
+  let fineCount = 0;
+  for (const loan of overdueReturnedLoans) {
+    await prisma.fine.create({
+      data: {
+        loanId: loan.id,
+        userId: loan.userId,
+        amount: loan.fineAmount,
+        status: FineStatus.UNPAID,
+        reason: 'Overdue',
+        createdAt: loan.returnedAt!,
+      },
+    });
+    fineCount++;
+  }
+
+  // Create fines for currently overdue active loans (preview fines)
+  const activeOverdueLoans = await prisma.loan.findMany({
+    where: { returnedAt: null, dueDate: { lt: new Date() } },
+    include: {
+      user: { select: { id: true, name: true, email: true } },
+      bookCopy: { include: { book: { select: { title: true } } } },
+    },
+  });
+
+  // Also create some paid & waived fines for variety
+  const paidFineLoans = overdueReturnedLoans.slice(0, 2);
+  for (const loan of paidFineLoans) {
+    const existingFine = await prisma.fine.findFirst({ where: { loanId: loan.id } });
+    if (existingFine) {
+      await prisma.fine.update({
+        where: { id: existingFine.id },
+        data: { status: FineStatus.PAID, paidAt: new Date() },
+      });
+    }
+  }
+
+  const waivedFineLoans = overdueReturnedLoans.slice(2, 3);
+  for (const loan of waivedFineLoans) {
+    const existingFine = await prisma.fine.findFirst({ where: { loanId: loan.id } });
+    if (existingFine) {
+      await prisma.fine.update({
+        where: { id: existingFine.id },
+        data: { status: FineStatus.WAIVED, waivedBy: 'Alice Admin' },
+      });
+    }
+  }
+
+  // Seed transaction logs from existing loans
+  const allLoans = await prisma.loan.findMany({
+    include: {
+      user: { select: { id: true, name: true, email: true } },
+      bookCopy: { include: { book: { select: { title: true } } } },
+    },
+    orderBy: { checkedOutAt: 'asc' },
+  });
+
+  const txData: {
+    type: TransactionType;
+    loanId: string;
+    bookTitle: string;
+    memberName: string;
+    memberNumber: string;
+    processedBy: string;
+    details: string;
+    createdAt: Date;
+  }[] = [];
+
+  for (const loan of allLoans) {
+    txData.push({
+      type: TransactionType.CHECKOUT,
+      loanId: loan.id,
+      bookTitle: loan.bookCopy.book.title,
+      memberName: loan.user.name,
+      memberNumber: loan.user.email,
+      processedBy: staff[Math.floor(Math.random() * staff.length)].name,
+      details: `Checked out for 14 days, due ${loan.dueDate.toISOString().slice(0, 10)}`,
+      createdAt: loan.checkedOutAt,
+    });
+
+    if (loan.returnedAt) {
+      txData.push({
+        type: TransactionType.CHECKIN,
+        loanId: loan.id,
+        bookTitle: loan.bookCopy.book.title,
+        memberName: loan.user.name,
+        memberNumber: loan.user.email,
+        processedBy: staff[Math.floor(Math.random() * staff.length)].name,
+        details: loan.fineAmount > 0
+          ? `Returned late, fine of $${loan.fineAmount.toFixed(2)} applied`
+          : 'Returned on time, no fines',
+        createdAt: loan.returnedAt,
+      });
+    }
+  }
+
+  // Add FINE_PAID and FINE_WAIVED transactions for the fines we marked above
+  for (const loan of paidFineLoans) {
+    txData.push({
+      type: TransactionType.FINE_PAID,
+      loanId: loan.id,
+      bookTitle: loan.bookCopy.book.title,
+      memberName: loan.user.name,
+      memberNumber: loan.user.email,
+      processedBy: 'Alice Admin',
+      details: `Fine of $${loan.fineAmount.toFixed(2)} paid`,
+      createdAt: new Date(),
+    });
+  }
+  for (const loan of waivedFineLoans) {
+    txData.push({
+      type: TransactionType.FINE_WAIVED,
+      loanId: loan.id,
+      bookTitle: loan.bookCopy.book.title,
+      memberName: loan.user.name,
+      memberNumber: loan.user.email,
+      processedBy: 'Alice Admin',
+      details: `Fine of $${loan.fineAmount.toFixed(2)} waived`,
+      createdAt: new Date(),
+    });
+  }
+
+  await prisma.transactionLog.createMany({ data: txData });
+
+  console.log(`Seeding complete. Created ${loanCount} loans, ${fineCount} fines, ${txData.length} transaction logs.`);
 }
 
 main()

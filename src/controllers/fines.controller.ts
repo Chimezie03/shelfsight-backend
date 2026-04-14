@@ -1,0 +1,65 @@
+import type { Request, Response } from 'express';
+import { fetchFines, payFine, waiveFine } from '../services/fines.service';
+import { createTransaction } from '../services/transactions.service';
+import { AppError } from '../lib/errors';
+
+export async function getFines(req: Request, res: Response) {
+  const { userId, status, search, page = 1, limit = 100 } = req.query;
+
+  const result = await fetchFines({
+    userId: typeof userId === 'string' ? userId : undefined,
+    status: typeof status === 'string' ? (status as 'UNPAID' | 'PAID' | 'WAIVED') : undefined,
+    search: typeof search === 'string' ? search : undefined,
+    page: Number(page),
+    limit: Number(limit),
+  });
+
+  res.json(result);
+}
+
+export async function markFinePaid(req: Request, res: Response) {
+  const { fineId } = req.params;
+  if (!fineId) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Missing required param: fineId', {
+      fieldErrors: { fineId: 'Required' },
+    });
+  }
+
+  const fine = await payFine(fineId);
+
+  await createTransaction({
+    type: 'FINE_PAID',
+    loanId: fine.loanId,
+    bookTitle: fine.bookTitle,
+    memberName: fine.memberName,
+    memberNumber: fine.memberNumber,
+    processedBy: req.user?.name ?? 'Staff',
+    details: `Fine of $${fine.amount.toFixed(2)} paid`,
+  });
+
+  res.json(fine);
+}
+
+export async function markFineWaived(req: Request, res: Response) {
+  const { fineId } = req.params;
+  if (!fineId) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Missing required param: fineId', {
+      fieldErrors: { fineId: 'Required' },
+    });
+  }
+
+  const staffName = req.user?.name ?? 'Staff';
+  const fine = await waiveFine(fineId, staffName);
+
+  await createTransaction({
+    type: 'FINE_WAIVED',
+    loanId: fine.loanId,
+    bookTitle: fine.bookTitle,
+    memberName: fine.memberName,
+    memberNumber: fine.memberNumber,
+    processedBy: staffName,
+    details: `Fine of $${fine.amount.toFixed(2)} waived`,
+  });
+
+  res.json(fine);
+}

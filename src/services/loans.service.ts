@@ -1,8 +1,10 @@
 import prisma from '../lib/prisma';
 import { AppError } from '../lib/errors';
+import { createTransaction } from './transactions.service';
 
 const DEFAULT_LOAN_DAYS = 14;
 const FINE_PER_DAY = 0.25;
+const MAX_FINE_PER_ITEM = 25.0;
 
 interface FetchLoansParams {
   userId?: string;
@@ -71,6 +73,16 @@ export async function checkoutService(userId: string, bookCopyId: string, dueDay
     }),
   ]);
 
+  await createTransaction({
+    type: 'CHECKOUT',
+    loanId: loan.id,
+    bookTitle: loan.bookCopy.book.title,
+    memberName: loan.user.name,
+    memberNumber: loan.user.email,
+    processedBy: 'Staff',
+    details: `Checked out for ${dueDays ?? DEFAULT_LOAN_DAYS} days, due ${dueDate.toISOString().slice(0, 10)}`,
+  });
+
   return mapLoanResponse(loan);
 }
 
@@ -83,10 +95,13 @@ export async function checkinService(loanId: string) {
   let fineAmount = 0;
   if (now > loan.dueDate) {
     const overdueDays = Math.ceil((now.getTime() - loan.dueDate.getTime()) / (1000 * 60 * 60 * 24));
-    fineAmount = parseFloat((overdueDays * FINE_PER_DAY).toFixed(2));
+    fineAmount = Math.min(
+      parseFloat((overdueDays * FINE_PER_DAY).toFixed(2)),
+      MAX_FINE_PER_ITEM,
+    );
   }
 
-  const [updated] = await prisma.$transaction([
+  const txOps: any[] = [
     prisma.loan.update({
       where: { id: loanId },
       data: { returnedAt: now, fineAmount },
@@ -106,7 +121,41 @@ export async function checkinService(loanId: string) {
     prisma.bookCopyEvent.create({
       data: { bookCopyId: loan.bookCopyId, type: 'RETURNED', userId: loan.userId, loanId },
     }),
-  ]);
+  ];
+
+  // Create a Fine record if overdue
+  if (fineAmount > 0) {
+    txOps.push(
+      prisma.fine.create({
+        data: {
+          loanId,
+          userId: loan.userId,
+          amount: fineAmount,
+          reason: 'Overdue',
+        },
+      }),
+    );
+  }
+
+  const results = await prisma.$transaction(txOps);
+  const updated = results[0];
+
+  // Create transaction log entry for check-in
+  const overdueDays = fineAmount > 0
+    ? Math.ceil((now.getTime() - loan.dueDate.getTime()) / (1000 * 60 * 60 * 24))
+    : 0;
+
+  await createTransaction({
+    type: 'CHECKIN',
+    loanId,
+    bookTitle: updated.bookCopy.book.title,
+    memberName: updated.user.name,
+    memberNumber: updated.user.email,
+    processedBy: 'Staff',
+    details: fineAmount > 0
+      ? `Returned ${overdueDays} days late, fine of $${fineAmount.toFixed(2)} applied`
+      : 'Returned on time, no fines',
+  });
 
   return mapLoanResponse(updated);
 }

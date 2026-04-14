@@ -13,7 +13,7 @@ import { errorHandler } from './middleware/error-handler';
 declare global {
   namespace Express {
     interface Request {
-      user?: { userId: string; role: string };
+      user?: { userId: string; role: string; name: string; email: string };
     }
   }
 }

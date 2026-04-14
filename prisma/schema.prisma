@@ -97,10 +97,57 @@ model Loan {
   dueDate      DateTime
   returnedAt   DateTime?
   fineAmount   Float      @default(0)
+  fines        Fine[]
 
   @@index([userId, checkedOutAt])
   @@index([bookCopyId, returnedAt])
   @@index([returnedAt, dueDate])
+}
+
+model Fine {
+  id        String     @id @default(uuid())
+  loan      Loan       @relation(fields: [loanId], references: [id])
+  loanId    String
+  userId    String
+  amount    Float
+  status    FineStatus @default(UNPAID)
+  reason    String     @default("Overdue")
+  paidAt    DateTime?
+  waivedBy  String?
+  createdAt DateTime   @default(now())
+
+  @@index([userId, status])
+  @@index([loanId])
+  @@index([createdAt])
+}
+
+enum FineStatus {
+  UNPAID
+  PAID
+  WAIVED
+}
+
+model TransactionLog {
+  id           String          @id @default(uuid())
+  type         TransactionType
+  loanId       String?
+  bookTitle    String
+  memberName   String
+  memberNumber String
+  processedBy  String
+  details      String
+  createdAt    DateTime        @default(now())
+
+  @@index([type, createdAt])
+  @@index([createdAt])
+}
+
+enum TransactionType {
+  CHECKOUT
+  CHECKIN
+  RENEWAL
+  FINE_PAID
+  FINE_WAIVED
 }
 
 model ShelfSection {
