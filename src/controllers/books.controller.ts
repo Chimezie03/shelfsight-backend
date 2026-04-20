@@ -3,6 +3,7 @@ import {
   fetchBooks,
   fetchBookById,
   createBookService,
+  bulkCreateBooksService,
   updateBookService,
   deleteBookService,
 } from '../services/books.service';
@@ -54,9 +55,32 @@ export async function getBook(req: Request, res: Response) {
   res.json(book);
 }
 
+import * as xlsx from 'xlsx';
+
 export async function createBook(req: Request, res: Response) {
   const book = await createBookService(req.body);
   res.status(201).json(book);
+}
+
+export async function bulkUploadFile(req: Request, res: Response) {
+  if (!req.file) {
+    const error: any = new Error('No file uploaded');
+    error.status = 400;
+    throw error;
+  }
+  
+  const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
+  const sheetName = workbook.SheetNames[0];
+  const items = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+  
+  // Basic validation that it possesses keys that look like book
+  const result = await bulkCreateBooksService(items);
+  res.status(200).json(result);
+}
+
+export async function bulkCreateBooks(req: Request, res: Response) {
+  const result = await bulkCreateBooksService(req.body);
+  res.status(201).json(result);
 }
 
 export async function updateBook(req: Request, res: Response) {

@@ -284,6 +284,112 @@ export async function createBookService(data: any) {
   return mapBookWithCopies(book);
 }
 
+export async function bulkCreateBooksService(items: any[]) {
+  if (!Array.isArray(items)) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Payload must be an array of book objects');
+  }
+
+  const results = {
+    total: items.length,
+    successful: 0,
+    failed: 0,
+    errors: [] as { index: number; isbn: string; reason: string }[],
+  };
+
+  const batchSize = 500;
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+
+    // Process validations explicitly before DB ops to track errors per row
+    const toCreate: { book: any; copiesCount: number; copyStatus: any }[] = [];
+
+    for (let j = 0; j < batch.length; j++) {
+      const data = batch[j];
+      const globalIndex = i + j;
+      const dataIsbn = data.isbn ? String(data.isbn) : '';
+
+      try {
+        if (!data.title) throw new Error('Missing title');
+        if (!data.author) throw new Error('Missing author');
+        if (!dataIsbn) throw new Error('Missing ISBN');
+
+        const isbnErr = validateIsbn(dataIsbn);
+        if (isbnErr) throw new Error(isbnErr);
+
+        const copiesCount = Math.max(0, parseInt(data.copies) || 1); // default 1 copy if bulk uploaded
+        const copyStatus = mapCopyStatus(data.status);
+
+        toCreate.push({
+          book: { ...bookPayload(data), isbn: dataIsbn },
+          copiesCount,
+          copyStatus,
+        });
+      } catch (err: any) {
+        results.failed++;
+        results.errors.push({
+          index: globalIndex,
+          isbn: dataIsbn || 'unknown',
+          reason: err.message,
+        });
+      }
+    }
+
+    // Now attempt actual upserts in DB sequentially or using small sub-batches to avoid transaction failure taking out the whole batch
+    for (const item of toCreate) {
+      const { book, copiesCount, copyStatus } = item;
+      const cleanIsbn = book.isbn.replace(/-/g, '');
+      
+      try {
+        await prisma.$transaction(async (tx) => {
+          // Check if exists
+          const existing = await tx.book.findUnique({ where: { isbn: book.isbn } });
+          if (!existing) {
+            // Create New
+            await tx.book.create({
+              data: {
+                ...book,
+                copies: copiesCount > 0 ? {
+                  create: Array.from({ length: copiesCount }, (_, idx) => ({
+                    barcode: `${cleanIsbn}-${idx + 1}-${Date.now()}`,
+                    status: copyStatus,
+                  }))
+                } : undefined
+              }
+            });
+          } else {
+            // Upsert / just add copies or update metadata (for failure recovery/duplicates)
+            // We will just update fields if they were provided anew, and ensure at least one copy logic? 
+            // We'll just update book metadata as duplicate handling (upsert).
+            await tx.book.update({
+              where: { id: existing.id },
+              data: {
+                title: book.title,
+                author: book.author,
+                genre: book.genre,
+                publishYear: book.publishYear,
+                pageCount: book.pageCount,
+                deweyDecimal: book.deweyDecimal,
+                language: book.language,
+                coverImageUrl: book.coverImageUrl,
+              }
+            });
+          }
+        });
+        results.successful++;
+      } catch (dbErr: any) {
+        results.failed++;
+        results.errors.push({
+          index: -1, // we don't have original global index here trivially, but we have isbn
+          isbn: book.isbn,
+          reason: `Database error: ${dbErr.message}`,
+        });
+      }
+    }
+  }
+
+  return results;
+}
+
 export async function updateBookService(id: string, data: any) {
   if (data.isbn) {
     const isbnErr = validateIsbn(data.isbn);
