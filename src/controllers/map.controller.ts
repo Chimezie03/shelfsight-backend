@@ -18,24 +18,24 @@ export async function listSections(req: Request, res: Response) {
   const safeFloor =
     floor !== undefined && Number.isInteger(floor) && floor >= 0 ? floor : undefined;
   const data = await listShelfSections(safeFloor);
-  res.json(data);
+  res.json({ success: true, data });
 }
 
 export async function getSection(req: Request, res: Response) {
   const section = await getShelfSectionById(req.params.id);
-  res.json(section);
+  res.json({ success: true, data: section });
 }
 
 export async function createSection(req: Request, res: Response) {
   const payload = parseShelfSectionPayload(req.body);
   const section = await createShelfSection(payload);
-  res.status(201).json(section);
+  res.status(201).json({ success: true, data: section });
 }
 
 export async function updateSection(req: Request, res: Response) {
   const partial = parseShelfSectionPartial(req.body);
   const section = await updateShelfSection(req.params.id, partial);
-  res.json(section);
+  res.json({ success: true, data: section });
 }
 
 export async function deleteSection(req: Request, res: Response) {

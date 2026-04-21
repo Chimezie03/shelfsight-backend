@@ -297,6 +297,51 @@ export interface DeweyClassification {
   dewey_class: string | null;
   confidence_score: number;
   reasoning: string | null;
+  /**
+   * KAN-60: indicates where the classification came from so the UI can
+   * show a badge on non-LLM results. 'llm' = OpenAI, 'heuristic' = subject
+   * keyword match, 'unavailable' = no signal at all (neither LLM nor
+   * heuristic could decide).
+   */
+  source: 'llm' | 'heuristic' | 'unavailable';
+}
+
+// Subject keyword → Dewey hundreds. Coarse on purpose — it's only the
+// fallback when OpenAI is unavailable and real catalog sources (WorldCat,
+// Open Library) didn't return a classification.
+const DEWEY_KEYWORD_MAP: Array<{ keywords: RegExp; dewey: string; label: string }> = [
+  { keywords: /philosophy|ethics|logic|metaphysics/i, dewey: '100', label: 'Philosophy' },
+  { keywords: /religion|theology|bible|christian|islam|buddh|hindu/i, dewey: '200', label: 'Religion' },
+  { keywords: /politic|economic|sociolog|law|education|statistic|government/i, dewey: '300', label: 'Social sciences' },
+  { keywords: /language|linguistic|grammar|dictionar/i, dewey: '400', label: 'Language' },
+  { keywords: /mathematic|physics|chemistry|biolog|astronomy|geology|science/i, dewey: '500', label: 'Science' },
+  { keywords: /medicine|engineering|technology|computer|agriculture|cooking|manufactur/i, dewey: '600', label: 'Technology' },
+  { keywords: /art|music|sport|recreation|photograph|architecture|theatre/i, dewey: '700', label: 'Arts & recreation' },
+  { keywords: /fiction|novel|poetry|drama|literature|essay/i, dewey: '800', label: 'Literature' },
+  { keywords: /histor|geograph|biograph|travel/i, dewey: '900', label: 'History & geography' },
+];
+
+/**
+ * KAN-60: deterministic Dewey guess from subjects/title when OpenAI is
+ * unavailable. Returns null if nothing matches so callers can show a clear
+ * "no classification" state instead of silently stubbing 0.
+ */
+function heuristicDewey(metadata: BookMetadata, ocrText = ''): { dewey_class: string; label: string } | null {
+  const haystack = [
+    ...(metadata.subjects ?? []),
+    metadata.title ?? '',
+    ocrText.slice(0, 500),
+  ]
+    .filter(Boolean)
+    .join(' ');
+  if (!haystack.trim()) return null;
+
+  for (const rule of DEWEY_KEYWORD_MAP) {
+    if (rule.keywords.test(haystack)) {
+      return { dewey_class: rule.dewey, label: rule.label };
+    }
+  }
+  return null;
 }
 
 /**
@@ -319,11 +364,21 @@ export async function classifyDeweyDecimal(
   metadata: BookMetadata,
 ): Promise<DeweyClassification> {
   if (!process.env.OPENAI_API_KEY) {
-    console.warn('[ingest] OPENAI_API_KEY not set – returning stub classification.');
+    console.warn('[ingest] OPENAI_API_KEY not set – trying heuristic Dewey fallback.');
+    const guess = heuristicDewey(metadata, ocrText);
+    if (guess) {
+      return {
+        dewey_class: guess.dewey_class,
+        confidence_score: 30, // low — heuristic only
+        reasoning: `Heuristic match on ${guess.label} keywords (no LLM configured).`,
+        source: 'heuristic',
+      };
+    }
     return {
       dewey_class: null,
       confidence_score: 0,
-      reasoning: 'LLM unavailable (no API key configured).',
+      reasoning: 'LLM unavailable and heuristic fallback found no matching subjects. Reviewer must set Dewey manually.',
+      source: 'unavailable',
     };
   }
 
@@ -364,13 +419,24 @@ export async function classifyDeweyDecimal(
           ? Math.min(100, Math.max(0, Math.round(parsed.confidence_score)))
           : 0,
       reasoning: parsed.reasoning ?? null,
+      source: 'llm',
     };
   } catch (err: any) {
     console.error('[ingest] OpenAI classification error:', err.message);
+    const guess = heuristicDewey(metadata, ocrText);
+    if (guess) {
+      return {
+        dewey_class: guess.dewey_class,
+        confidence_score: 30,
+        reasoning: `LLM error (${err.message}); fell back to heuristic match on ${guess.label} keywords.`,
+        source: 'heuristic',
+      };
+    }
     return {
       dewey_class: null,
       confidence_score: 0,
       reasoning: `LLM error: ${err.message}`,
+      source: 'unavailable',
     };
   }
 }
