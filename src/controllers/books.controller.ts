@@ -62,11 +62,11 @@ export async function createBook(req: Request, res: Response) {
   res.status(201).json(book);
 }
 
+import { AppError } from '../lib/errors';
+
 export async function bulkUploadFile(req: Request, res: Response) {
   if (!req.file) {
-    const error: any = new Error('No file uploaded');
-    error.status = 400;
-    throw error;
+    throw new AppError(400, 'VALIDATION_ERROR', 'No file uploaded');
   }
   
   const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
