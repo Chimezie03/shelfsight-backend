@@ -75,7 +75,21 @@ export async function bulkUploadFile(req: Request, res: Response) {
   
   const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
   const sheetName = workbook.SheetNames[0];
-  const items = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+  const rawItems = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+  
+  const items = rawItems.map((row: any) => ({
+    ...row,
+    title: row.title || row.Title,
+    author: row.author || row.Author,
+    isbn: row.isbn || row['ISBN-13'] || row.ISBN,
+    genre: row.genre || row.Category,
+    deweyDecimal: row.deweyDecimal || row['Dewey Decimal'],
+    language: row.language || row.Language,
+    publishYear: row.publishYear || row['Publication Year'],
+    pageCount: row.pageCount || row['Page Count'],
+    copies: row.copies || row['Total Copies'] || row['Available Copies'] || 1,
+    status: row.status || row.Status,
+  }));
   
   // Basic validation that it possesses keys that look like book
   const result = await bulkCreateBooksService(items);
