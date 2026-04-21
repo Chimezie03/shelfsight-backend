@@ -7,8 +7,12 @@ import {
 } from '../services/users.service';
 
 export async function getUsers(req: Request, res: Response) {
-  const users = await getUsersService();
-  res.json(users);
+  const { page, limit } = req.query;
+  const result = await getUsersService(
+    page !== undefined ? Number(page) : 1,
+    limit !== undefined ? Number(limit) : 50,
+  );
+  res.json(result);
 }
 
 export async function createUser(req: Request, res: Response) {

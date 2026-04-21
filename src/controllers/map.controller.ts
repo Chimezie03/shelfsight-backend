@@ -12,26 +12,30 @@ import {
 } from '../services/map.service';
 import { AppError } from '../lib/errors';
 
-export async function listSections(_req: Request, res: Response) {
-  const data = await listShelfSections();
-  res.json(data);
+export async function listSections(req: Request, res: Response) {
+  const floorParam = req.query.floor;
+  const floor = floorParam !== undefined ? Number(floorParam) : undefined;
+  const safeFloor =
+    floor !== undefined && Number.isInteger(floor) && floor >= 0 ? floor : undefined;
+  const data = await listShelfSections(safeFloor);
+  res.json({ success: true, data });
 }
 
 export async function getSection(req: Request, res: Response) {
   const section = await getShelfSectionById(req.params.id);
-  res.json(section);
+  res.json({ success: true, data: section });
 }
 
 export async function createSection(req: Request, res: Response) {
   const payload = parseShelfSectionPayload(req.body);
   const section = await createShelfSection(payload);
-  res.status(201).json(section);
+  res.status(201).json({ success: true, data: section });
 }
 
 export async function updateSection(req: Request, res: Response) {
   const partial = parseShelfSectionPartial(req.body);
   const section = await updateShelfSection(req.params.id, partial);
-  res.json(section);
+  res.json({ success: true, data: section });
 }
 
 export async function deleteSection(req: Request, res: Response) {

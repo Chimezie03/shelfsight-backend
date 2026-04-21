@@ -12,7 +12,9 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "test:k6:smoke": "node tests/k6/run-k6.mjs smoke",
+    "test:k6:load": "node tests/k6/run-k6.mjs multi-user"
   },
   "keywords": [],
   "author": "Team 10",
@@ -30,6 +32,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
+    "express-rate-limit": "^8.3.2",
     "helmet": "^7.0.0",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.0",

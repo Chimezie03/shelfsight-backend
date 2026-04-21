@@ -16,6 +16,8 @@ model User {
   role         Role
   createdAt    DateTime @default(now())
   loans        Loan[]
+
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
 }
 
 enum Role {
@@ -40,6 +42,9 @@ model Book {
 
   @@index([createdAt])
   @@index([language])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([author(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([genre])
 }
 
 model BookCopy {
@@ -140,6 +145,8 @@ model TransactionLog {
 
   @@index([type, createdAt])
   @@index([createdAt])
+  @@index([bookTitle(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@index([memberName(ops: raw("gin_trgm_ops"))], type: Gin)
 }
 
 enum TransactionType {
@@ -169,6 +176,8 @@ model ShelfSection {
   notes           String?
   shelfType       String?    @default("single-shelf")
   copies          BookCopy[]
+
+  @@index([floor])
 }
 
 model IngestionJob {

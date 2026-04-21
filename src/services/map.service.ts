@@ -182,10 +182,13 @@ function toResponse(section: any) {
 /**
  * ARCH DECISION: Stable ordering for map rendering — floor ascending, then Y, then X, then label.
  */
-export async function listShelfSections() {
+export async function listShelfSections(floor?: number) {
+  const MAX_SECTIONS = 500;
   const rows = await prisma.shelfSection.findMany({
+    where: floor !== undefined ? { floor } : undefined,
     include: { _count: { select: { copies: true } } },
     orderBy: [{ floor: 'asc' }, { mapY: 'asc' }, { mapX: 'asc' }, { label: 'asc' }],
+    take: MAX_SECTIONS,
   });
   return rows.map(toResponse);
 }

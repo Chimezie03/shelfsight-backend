@@ -60,13 +60,6 @@ export async function getUserById(userId: string) {
       name: true,
       role: true,
       createdAt: true,
-      loans: {
-        include: {
-          bookCopy: {
-            include: { book: true },
-          },
-        },
-      },
     },
   });
 
