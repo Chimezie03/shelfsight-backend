@@ -1,6 +1,6 @@
 # Task 3 - Load Testing and Multi-User Testing (k6)
 
-This folder documents Task 3 deliverables for ShelfSight (k6 scenarios, concurrent workflow coverage, measured performance, and current system limits).
+This folder documents Task 3 deliverables for ShelfSight (k6 scenarios, concurrent workflow coverage, measured performance, and current system limits)
 
 ## A. Scope and flows
 
