@@ -1,0 +1,1 @@
+const { PrismaClient } = require('@prisma/client'); const prisma = new PrismaClient(); prisma.$executeRawUnsafe('CREATE EXTENSION IF NOT EXISTS pg_trgm;').then(() => console.log('success')).catch(console.error).finally(()=>prisma.$disconnect());

@@ -46,15 +46,15 @@ const CATEGORY_RANGES: Record<string, readonly [number, number]> = {
 };
 
 const bookPayload = (data: any) => ({
-  title: data.title,
-  author: data.author,
-  isbn: data.isbn,
-  genre: data.genre,
-  deweyDecimal: data.deweyDecimal,
-  language: data.language ?? undefined,
-  coverImageUrl: data.coverImageUrl,
-  publishYear: data.publishYear ?? data.publishDate ?? undefined,
-  pageCount: data.pageCount != null ? (parseInt(data.pageCount) || null) : undefined,
+  title: typeof data.title === 'string' ? data.title : String(data.title),
+  author: typeof data.author === 'string' ? data.author : String(data.author),
+  isbn: typeof data.isbn === 'string' ? data.isbn : String(data.isbn),
+  genre: data.genre ? String(data.genre) : undefined,
+  deweyDecimal: data.deweyDecimal != null ? String(data.deweyDecimal) : undefined,
+  language: data.language != null ? String(data.language) : undefined,
+  coverImageUrl: data.coverImageUrl != null ? String(data.coverImageUrl) : undefined,
+  publishYear: (data.publishYear ?? data.publishDate) != null ? String(data.publishYear ?? data.publishDate) : undefined,
+  pageCount: data.pageCount != null ? parseInt(data.pageCount, 10) || null : undefined,
 });
 
 /** Matches list-item shape expected by frontend `BackendBook` / catalog transforms. */
