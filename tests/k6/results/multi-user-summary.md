@@ -1,7 +1,5 @@
 # k6 Summary: multi-user
 
-Generated: 2026-04-21T07:09:54.456Z
-
 ## HTTP
 - p90: 184.13 ms
 - p95: 279.74 ms
