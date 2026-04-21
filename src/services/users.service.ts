@@ -14,6 +14,15 @@ const USER_PUBLIC_SELECT = {
   createdAt: true,
 } as const;
 
+// Simple RFC-5322-ish email shape used by the login page and the members admin
+// form. Deliberately permissive (no TLD list) so international + team-local
+// addresses work, strict enough to reject values like "not-an-email".
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// KAN-59: minimum 8 chars. Matches the length enforced on the frontend login
+// page validator and the password seed (`password123` = 11 chars).
+const MIN_PASSWORD_LENGTH = 8;
+
 function isValidRole(value: unknown): value is Role {
   return typeof value === 'string' && VALID_ROLES.includes(value as Role);
 }
@@ -67,6 +76,18 @@ export async function createUserService(data: Record<string, unknown>) {
       fieldErrors: { email: 'Required' },
     });
   }
+  if (!EMAIL_PATTERN.test(email)) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Validation failed', {
+      fieldErrors: { email: 'Must be a valid email address' },
+    });
+  }
+
+  const rawPassword = data.password as string;
+  if (rawPassword.length < MIN_PASSWORD_LENGTH) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Validation failed', {
+      fieldErrors: { password: `Must be at least ${MIN_PASSWORD_LENGTH} characters` },
+    });
+  }
 
   const name = (data.name as string).trim();
   if (!name) {
@@ -82,7 +103,7 @@ export async function createUserService(data: Record<string, unknown>) {
     });
   }
 
-  const passwordHash = await bcrypt.hash(data.password as string, 10);
+  const passwordHash = await bcrypt.hash(rawPassword, 10);
   return await prisma.user.create({
     data: {
       email,
@@ -128,6 +149,11 @@ export async function updateUserService(id: string, data: Record<string, unknown
         fieldErrors: { email: 'Required' },
       });
     }
+    if (!EMAIL_PATTERN.test(email)) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'Validation failed', {
+        fieldErrors: { email: 'Must be a valid email address' },
+      });
+    }
     if (email !== existing.email) {
       const conflict = await prisma.user.findUnique({ where: { email } });
       if (conflict) {
@@ -152,6 +178,11 @@ export async function updateUserService(id: string, data: Record<string, unknown
     if (typeof data.password !== 'string') {
       throw new AppError(400, 'VALIDATION_ERROR', 'Validation failed', {
         fieldErrors: { password: 'Invalid' },
+      });
+    }
+    if (data.password.length < MIN_PASSWORD_LENGTH) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'Validation failed', {
+        fieldErrors: { password: `Must be at least ${MIN_PASSWORD_LENGTH} characters` },
       });
     }
     updateData.passwordHash = await bcrypt.hash(data.password, 10);
