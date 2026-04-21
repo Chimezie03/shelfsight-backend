@@ -28,25 +28,29 @@ app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000', crede
 app.use(express.json());
 app.use(cookieParser());
 
-// Global rate limit: 300 requests per 15 minutes per IP
-const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 300,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'TOO_MANY_REQUESTS', message: 'Too many requests, please try again later.' },
-});
-app.use(globalLimiter);
+// Rate limiting is disabled in development/test to allow load testing.
+// It is enforced in production only.
+if (process.env.NODE_ENV === 'production') {
+  // Global rate limit: 300 requests per 15 minutes per IP
+  const globalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'TOO_MANY_REQUESTS', message: 'Too many requests, please try again later.' },
+  });
+  app.use(globalLimiter);
 
-// Strict limit on auth endpoints: 15 requests per 15 minutes per IP
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 15,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'TOO_MANY_REQUESTS', message: 'Too many login attempts, please try again later.' },
-});
-app.use('/auth/login', authLimiter);
+  // Strict limit on auth endpoints: 15 requests per 15 minutes per IP
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 15,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'TOO_MANY_REQUESTS', message: 'Too many login attempts, please try again later.' },
+  });
+  app.use('/auth/login', authLimiter);
+}
 if (process.env.NODE_ENV === 'production') {
   app.use(httpAccessLog);
 } else {
