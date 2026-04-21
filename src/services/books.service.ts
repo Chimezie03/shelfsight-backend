@@ -360,56 +360,101 @@ export async function bulkCreateBooksService(items: any[]) {
       }
     }
 
-    // Now attempt actual upserts in DB sequentially or using small sub-batches to avoid transaction failure taking out the whole batch
-    for (const item of toCreate) {
-      const { book, copiesCount, copyStatus } = item;
-      const cleanIsbn = book.isbn.replace(/-/g, '');
-      
-      try {
-        await prisma.$transaction(async (tx) => {
-          // Check if exists
-          const existing = await tx.book.findUnique({ where: { isbn: book.isbn } });
-          if (!existing) {
-            // Create New
-            await tx.book.create({
-              data: {
-                ...book,
-                copies: copiesCount > 0 ? {
-                  create: Array.from({ length: copiesCount }, (_, idx) => ({
-                    barcode: `${cleanIsbn}-${idx + 1}-${Date.now()}`,
-                    status: copyStatus,
-                  }))
-                } : undefined
+    if (toCreate.length === 0) continue;
+
+    try {
+      const isbns = toCreate.map(item => item.book.isbn);
+      const existingBooks = await prisma.book.findMany({
+        where: { isbn: { in: isbns } },
+        select: { id: true, isbn: true }
+      });
+      const existingIsbns = new Set(existingBooks.map(b => b.isbn));
+
+      const newBooks = toCreate.filter(item => !existingIsbns.has(item.book.isbn));
+      const existingToUpdate = toCreate.filter(item => existingIsbns.has(item.book.isbn));
+
+      if (newBooks.length > 0) {
+        await prisma.book.createMany({
+          data: newBooks.map(item => ({
+            title: item.book.title,
+            author: item.book.author,
+            isbn: item.book.isbn,
+            genre: item.book.genre,
+            deweyDecimal: item.book.deweyDecimal,
+            language: item.book.language,
+            coverImageUrl: item.book.coverImageUrl,
+            publishYear: item.book.publishYear,
+            pageCount: item.book.pageCount,
+          })),
+          skipDuplicates: true,
+        });
+
+        // Get newly created book IDs for copies mapping
+        const newlyCreatedBooks = await prisma.book.findMany({
+          where: { isbn: { in: newBooks.map(b => b.book.isbn) } },
+          select: { id: true, isbn: true }
+        });
+
+        const newCopiesData: any[] = [];
+        const ts = Date.now();
+        
+        for (const item of newBooks) {
+          if (item.copiesCount > 0) {
+            const dbBook = newlyCreatedBooks.find(b => b.isbn === item.book.isbn);
+            if (dbBook) {
+              const cleanIsbn = dbBook.isbn.replace(/-/g, '');
+              for (let i = 0; i < item.copiesCount; i++) {
+                newCopiesData.push({
+                  bookId: dbBook.id,
+                  barcode: `${cleanIsbn}-${i + 1}-${ts}`,
+                  status: item.copyStatus
+                });
               }
-            });
-          } else {
-            // Upsert / just add copies or update metadata (for failure recovery/duplicates)
-            // We will just update fields if they were provided anew, and ensure at least one copy logic? 
-            // We'll just update book metadata as duplicate handling (upsert).
-            await tx.book.update({
-              where: { id: existing.id },
-              data: {
-                title: book.title,
-                author: book.author,
-                genre: book.genre,
-                publishYear: book.publishYear,
-                pageCount: book.pageCount,
-                deweyDecimal: book.deweyDecimal,
-                language: book.language,
-                coverImageUrl: book.coverImageUrl,
-              }
-            });
+            }
           }
-        });
-        results.successful++;
-      } catch (dbErr: any) {
-        results.failed++;
-        results.errors.push({
-          index: -1, // we don't have original global index here trivially, but we have isbn
-          isbn: book.isbn,
-          reason: `Database error: ${dbErr.message}`,
-        });
+        }
+
+        if (newCopiesData.length > 0) {
+          await prisma.bookCopy.createMany({
+            data: newCopiesData,
+          });
+        }
       }
+
+      const updates: any[] = [];
+      for (const item of existingToUpdate) {
+        const dbBook = existingBooks.find(b => b.isbn === item.book.isbn);
+        if (dbBook) {
+          updates.push(
+            prisma.book.update({
+              where: { id: dbBook.id },
+              data: {
+                title: item.book.title,
+                author: item.book.author,
+                genre: item.book.genre,
+                publishYear: item.book.publishYear,
+                pageCount: item.book.pageCount,
+                deweyDecimal: item.book.deweyDecimal,
+                language: item.book.language,
+                coverImageUrl: item.book.coverImageUrl,
+              }
+            })
+          );
+        }
+      }
+
+      if (updates.length > 0) {
+        await prisma.$transaction(updates);
+      }
+
+      results.successful += toCreate.length;
+    } catch (dbErr: any) {
+      results.failed += toCreate.length;
+      results.errors.push({
+        index: -1,
+        isbn: 'batch',
+        reason: `Database error in batch: ${dbErr.message}`,
+      });
     }
   }
 
