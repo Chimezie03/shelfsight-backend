@@ -1,7 +1,5 @@
 # k6 Summary: smoke
 
-Generated: 2026-04-21T07:07:53.323Z
-
 ## HTTP
 - p90: 255.71 ms
 - p95: 258.06 ms
