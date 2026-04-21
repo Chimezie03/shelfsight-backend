@@ -1,0 +1,21 @@
+{
+  "suite": "smoke",
+  "generatedAt": "2026-04-21T07:07:53.323Z",
+  "http": {
+    "p90Ms": 255.70706,
+    "p95Ms": 258.06142,
+    "p99Ms": null,
+    "avgMs": 63.120268000000024,
+    "maxMs": 338.5048,
+    "reqFailedRate": 0
+  },
+  "checks": {
+    "passRate": 1,
+    "passes": 35,
+    "fails": 0
+  },
+  "execution": {
+    "iterations": 5,
+    "maxVUs": 1
+  }
+}

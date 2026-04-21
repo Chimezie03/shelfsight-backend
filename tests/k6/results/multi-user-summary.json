@@ -1,0 +1,21 @@
+{
+  "suite": "multi-user",
+  "generatedAt": "2026-04-21T07:09:54.456Z",
+  "http": {
+    "p90Ms": 184.1275800000002,
+    "p95Ms": 279.74337999999995,
+    "p99Ms": null,
+    "avgMs": 55.49535718819426,
+    "maxMs": 1223.9306,
+    "reqFailedRate": 0
+  },
+  "checks": {
+    "passRate": 1,
+    "passes": 14602,
+    "fails": 0
+  },
+  "execution": {
+    "iterations": 3531,
+    "maxVUs": 45
+  }
+}
