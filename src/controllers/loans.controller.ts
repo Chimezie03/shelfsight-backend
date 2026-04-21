@@ -40,15 +40,27 @@ export async function checkin(req: Request, res: Response) {
   res.json(loan);
 }
 
+const VALID_LOAN_STATUSES = new Set(['active', 'returned', 'overdue']);
+
 export async function getLoans(req: Request, res: Response) {
   const { userId, status, search, page = 1, limit = 20 } = req.query;
 
+  const MAX_LIMIT = 100;
+  const parsedPage = Math.max(1, Number(page) || 1);
+  const parsedLimit = Math.min(Math.max(1, Number(limit) || 20), MAX_LIMIT);
+
+  const rawStatus = typeof status === 'string' ? status : undefined;
+  const safeStatus =
+    rawStatus && VALID_LOAN_STATUSES.has(rawStatus)
+      ? (rawStatus as 'active' | 'returned' | 'overdue')
+      : undefined;
+
   const loans = await fetchLoans({
     userId: typeof userId === 'string' ? userId : undefined,
-    status: typeof status === 'string' ? (status as 'active' | 'returned' | 'overdue') : undefined,
+    status: safeStatus,
     search: typeof search === 'string' ? search : undefined,
-    page: Number(page),
-    limit: Number(limit),
+    page: parsedPage,
+    limit: parsedLimit,
   });
 
   res.json(loans);

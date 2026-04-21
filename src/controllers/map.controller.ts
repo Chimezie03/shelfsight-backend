@@ -12,8 +12,12 @@ import {
 } from '../services/map.service';
 import { AppError } from '../lib/errors';
 
-export async function listSections(_req: Request, res: Response) {
-  const data = await listShelfSections();
+export async function listSections(req: Request, res: Response) {
+  const floorParam = req.query.floor;
+  const floor = floorParam !== undefined ? Number(floorParam) : undefined;
+  const safeFloor =
+    floor !== undefined && Number.isInteger(floor) && floor >= 0 ? floor : undefined;
+  const data = await listShelfSections(safeFloor);
   res.json(data);
 }
 

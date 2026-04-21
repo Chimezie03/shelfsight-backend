@@ -18,11 +18,30 @@ function isValidRole(value: unknown): value is Role {
   return typeof value === 'string' && VALID_ROLES.includes(value as Role);
 }
 
-export async function getUsersService() {
-  return await prisma.user.findMany({
-    select: { ...USER_PUBLIC_SELECT },
-    orderBy: { createdAt: 'desc' },
-  });
+export async function getUsersService(page = 1, limit = 50) {
+  const MAX_LIMIT = 100;
+  const safePage = Math.max(1, Math.floor(page));
+  const safeLimit = Math.min(Math.max(1, Math.floor(limit)), MAX_LIMIT);
+
+  const [users, total] = await prisma.$transaction([
+    prisma.user.findMany({
+      select: { ...USER_PUBLIC_SELECT },
+      orderBy: { createdAt: 'desc' },
+      skip: (safePage - 1) * safeLimit,
+      take: safeLimit,
+    }),
+    prisma.user.count(),
+  ]);
+
+  return {
+    data: users,
+    pagination: {
+      page: safePage,
+      limit: safeLimit,
+      total,
+      totalPages: Math.ceil(total / safeLimit),
+    },
+  };
 }
 
 export async function createUserService(data: Record<string, unknown>) {

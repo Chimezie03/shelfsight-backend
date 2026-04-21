@@ -26,6 +26,10 @@ export async function getBooks(req: Request, res: Response) {
     limit = 20,
   } = req.query;
 
+  const MAX_LIMIT = 100;
+  const parsedPage = Math.max(1, Number(page) || 1);
+  const parsedLimit = Math.min(Math.max(1, Number(limit) || 20), MAX_LIMIT);
+
   const parsedYearMin =
     typeof yearMin === 'string' && yearMin.trim() !== '' ? Number(yearMin) : undefined;
   const parsedYearMax =
@@ -44,8 +48,8 @@ export async function getBooks(req: Request, res: Response) {
     yearMax: Number.isFinite(parsedYearMax) ? parsedYearMax : undefined,
     sortBy: typeof sortBy === 'string' ? sortBy : undefined,
     sortDir: typeof sortDir === 'string' ? sortDir : undefined,
-    page: Number(page),
-    limit: Number(limit),
+    page: parsedPage,
+    limit: parsedLimit,
   });
   res.json(books);
 }

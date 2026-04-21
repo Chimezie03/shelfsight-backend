@@ -3,15 +3,27 @@ import { fetchFines, payFine, waiveFine } from '../services/fines.service';
 import { createTransaction } from '../services/transactions.service';
 import { AppError } from '../lib/errors';
 
+const VALID_FINE_STATUSES = new Set(['UNPAID', 'PAID', 'WAIVED']);
+
 export async function getFines(req: Request, res: Response) {
-  const { userId, status, search, page = 1, limit = 100 } = req.query;
+  const { userId, status, search, page = 1, limit = 50 } = req.query;
+
+  const MAX_LIMIT = 100;
+  const parsedPage = Math.max(1, Number(page) || 1);
+  const parsedLimit = Math.min(Math.max(1, Number(limit) || 50), MAX_LIMIT);
+
+  const rawStatus = typeof status === 'string' ? status : undefined;
+  const safeStatus =
+    rawStatus && VALID_FINE_STATUSES.has(rawStatus)
+      ? (rawStatus as 'UNPAID' | 'PAID' | 'WAIVED')
+      : undefined;
 
   const result = await fetchFines({
     userId: typeof userId === 'string' ? userId : undefined,
-    status: typeof status === 'string' ? (status as 'UNPAID' | 'PAID' | 'WAIVED') : undefined,
+    status: safeStatus,
     search: typeof search === 'string' ? search : undefined,
-    page: Number(page),
-    limit: Number(limit),
+    page: parsedPage,
+    limit: parsedLimit,
   });
 
   res.json(result);

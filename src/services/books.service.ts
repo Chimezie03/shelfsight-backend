@@ -222,6 +222,32 @@ function matchesYearFilter(publishYear: string | null, yearMin?: number, yearMax
   return true;
 }
 
+/**
+ * Translate a frontend catalog status string into a Prisma WHERE filter on copies.
+ * This allows status filtering to run entirely in the database instead of loading
+ * all books into memory.
+ */
+function buildStatusFilter(status: CatalogStatus): Prisma.BookWhereInput {
+  if (status === 'available') {
+    return { copies: { some: { status: 'AVAILABLE' } } };
+  }
+  if (status === 'maintenance') {
+    return {
+      AND: [
+        { copies: { some: { status: 'PROCESSING' } } },
+        { copies: { none: { status: 'AVAILABLE' } } },
+      ],
+    };
+  }
+  // checked-out: has copies, none of which are AVAILABLE or PROCESSING
+  return {
+    AND: [
+      { copies: { some: {} } },
+      { copies: { none: { status: { in: ['AVAILABLE', 'PROCESSING'] } } } },
+    ],
+  };
+}
+
 function buildDbOrderBy(
   sortField: CatalogSortField | null,
   direction: SortDirection,
@@ -516,6 +542,9 @@ export async function fetchBooks(params: FetchBooksParams) {
   if (language && language !== 'all') {
     whereClauses.push({ language: { equals: language, mode: 'insensitive' } });
   }
+  if (normalizedStatus) {
+    whereClauses.push(buildStatusFilter(normalizedStatus));
+  }
 
   const normalizedSearch = search?.trim();
   if (normalizedSearch) {
@@ -533,7 +562,6 @@ export async function fetchBooks(params: FetchBooksParams) {
 
   const requiresInMemoryPass =
     Boolean(category && category !== 'all') ||
-    normalizedStatus !== null ||
     Number.isFinite(yearMin) ||
     Number.isFinite(yearMax) ||
     normalizedSortField === 'dewey' ||
@@ -576,10 +604,6 @@ export async function fetchBooks(params: FetchBooksParams) {
 
   if (category && category !== 'all') {
     filtered = filtered.filter((book) => matchesCategoryFilter(book, category));
-  }
-
-  if (normalizedStatus) {
-    filtered = filtered.filter((book) => toCatalogStatus(book) === normalizedStatus);
   }
 
   if (Number.isFinite(yearMin) || Number.isFinite(yearMax)) {
