@@ -45,6 +45,23 @@ const CATEGORY_RANGES: Record<string, readonly [number, number]> = {
   'History & Geography': [900, 999],
 };
 
+function toPositiveInt(value: unknown, fallback: number): number {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  if (size <= 0) return [items];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
 const bookPayload = (data: any) => ({
   title: typeof data.title === 'string' ? data.title : String(data.title),
   author: typeof data.author === 'string' ? data.author : String(data.author),
@@ -322,7 +339,10 @@ export async function bulkCreateBooksService(items: any[]) {
     errors: [] as { index: number; isbn: string; reason: string }[],
   };
 
-  const batchSize = 500;
+  const batchSize = toPositiveInt(process.env.BULK_UPLOAD_BATCH_SIZE, 500);
+  const dbBatchSize = toPositiveInt(process.env.BULK_UPLOAD_DB_BATCH_SIZE, 200);
+  const copyBatchSize = toPositiveInt(process.env.BULK_UPLOAD_COPY_BATCH_SIZE, 1000);
+  const updateBatchSize = toPositiveInt(process.env.BULK_UPLOAD_UPDATE_BATCH_SIZE, 100);
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
 
@@ -363,52 +383,77 @@ export async function bulkCreateBooksService(items: any[]) {
     if (toCreate.length === 0) continue;
 
     try {
-      const isbns = toCreate.map(item => item.book.isbn);
+      // Deduplicate by ISBN within the batch to prevent unique constraint errors 
+      // and sum up the copies.
+      const deduplicatedToCreate = new Map<string, any>();
+      for (const item of toCreate) {
+        if (deduplicatedToCreate.has(item.book.isbn)) {
+          const existing = deduplicatedToCreate.get(item.book.isbn)!;
+          existing.copiesCount += item.copiesCount;
+        } else {
+          deduplicatedToCreate.set(item.book.isbn, item);
+        }
+      }
+      const uniqueToCreate = Array.from(deduplicatedToCreate.values());
+
+      const isbns = uniqueToCreate.map((item) => item.book.isbn);
+      const uniqueIsbns = [...new Set(isbns)];
       const existingBooks = await prisma.book.findMany({
-        where: { isbn: { in: isbns } },
+        where: { isbn: { in: uniqueIsbns } },
         select: { id: true, isbn: true }
       });
-      const existingIsbns = new Set(existingBooks.map(b => b.isbn));
+      const existingIsbns = new Set(existingBooks.map((b) => b.isbn));
+      const existingByIsbn = new Map(existingBooks.map((b) => [b.isbn, b]));
 
-      const newBooks = toCreate.filter(item => !existingIsbns.has(item.book.isbn));
-      const existingToUpdate = toCreate.filter(item => existingIsbns.has(item.book.isbn));
+      const newBooks = uniqueToCreate.filter((item) => !existingIsbns.has(item.book.isbn));
+      const existingToUpdate = uniqueToCreate.filter((item) => existingIsbns.has(item.book.isbn));
 
       if (newBooks.length > 0) {
-        await prisma.book.createMany({
-          data: newBooks.map(item => ({
-            title: item.book.title,
-            author: item.book.author,
-            isbn: item.book.isbn,
-            genre: item.book.genre,
-            deweyDecimal: item.book.deweyDecimal,
-            language: item.book.language,
-            coverImageUrl: item.book.coverImageUrl,
-            publishYear: item.book.publishYear,
-            pageCount: item.book.pageCount,
-          })),
-          skipDuplicates: true,
-        });
+        const bookChunks = chunkArray(newBooks, dbBatchSize);
+        for (const chunk of bookChunks) {
+          await prisma.book.createMany({
+            data: chunk.map((item) => ({
+              title: item.book.title,
+              author: item.book.author,
+              isbn: item.book.isbn,
+              genre: item.book.genre,
+              deweyDecimal: item.book.deweyDecimal,
+              language: item.book.language,
+              coverImageUrl: item.book.coverImageUrl,
+              publishYear: item.book.publishYear,
+              pageCount: item.book.pageCount,
+            })),
+            skipDuplicates: true,
+          });
+        }
 
         // Get newly created book IDs for copies mapping
+        const createdIsbns = [...new Set(newBooks.map((b) => b.book.isbn))];
         const newlyCreatedBooks = await prisma.book.findMany({
-          where: { isbn: { in: newBooks.map(b => b.book.isbn) } },
+          where: { isbn: { in: createdIsbns } },
           select: { id: true, isbn: true }
         });
+        const createdByIsbn = new Map(newlyCreatedBooks.map((b) => [b.isbn, b]));
 
         const newCopiesData: any[] = [];
         const ts = Date.now();
-        
         for (const item of newBooks) {
           if (item.copiesCount > 0) {
-            const dbBook = newlyCreatedBooks.find(b => b.isbn === item.book.isbn);
+            const dbBook = createdByIsbn.get(item.book.isbn);
             if (dbBook) {
               const cleanIsbn = dbBook.isbn.replace(/-/g, '');
               for (let i = 0; i < item.copiesCount; i++) {
                 newCopiesData.push({
                   bookId: dbBook.id,
                   barcode: `${cleanIsbn}-${i + 1}-${ts}`,
-                  status: item.copyStatus
+                  status: item.copyStatus,
                 });
+
+                if (newCopiesData.length >= copyBatchSize) {
+                  await prisma.bookCopy.createMany({
+                    data: newCopiesData.splice(0, newCopiesData.length),
+                  });
+                }
               }
             }
           }
@@ -422,8 +467,10 @@ export async function bulkCreateBooksService(items: any[]) {
       }
 
       const updates: any[] = [];
+      const tsUpdate = Date.now();
+      const existingCopiesData: any[] = [];
       for (const item of existingToUpdate) {
-        const dbBook = existingBooks.find(b => b.isbn === item.book.isbn);
+        const dbBook = existingByIsbn.get(item.book.isbn);
         if (dbBook) {
           updates.push(
             prisma.book.update({
@@ -440,11 +487,37 @@ export async function bulkCreateBooksService(items: any[]) {
               }
             })
           );
+
+          if (item.copiesCount > 0) {
+            const cleanIsbn = dbBook.isbn.replace(/-/g, '');
+            for (let i = 0; i < item.copiesCount; i++) {
+              existingCopiesData.push({
+                bookId: dbBook.id,
+                barcode: `${cleanIsbn}-U-${i + 1}-${tsUpdate}`,
+                status: item.copyStatus,
+              });
+
+              if (existingCopiesData.length >= copyBatchSize) {
+                await prisma.bookCopy.createMany({
+                  data: existingCopiesData.splice(0, existingCopiesData.length),
+                });
+              }
+            }
+          }
         }
       }
 
+      if (existingCopiesData.length > 0) {
+        await prisma.bookCopy.createMany({
+          data: existingCopiesData.splice(0, existingCopiesData.length),
+        });
+      }
+
       if (updates.length > 0) {
-        await prisma.$transaction(updates);
+        const updateChunks = chunkArray(updates, updateBatchSize);
+        for (const chunk of updateChunks) {
+          await prisma.$transaction(chunk);
+        }
       }
 
       results.successful += toCreate.length;
