@@ -25,7 +25,8 @@ const app = express();
 
 app.use(helmet());
 app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000', credentials: true }));
-app.use(express.json());
+const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '10mb';
+app.use(express.json({ limit: jsonBodyLimit }));
 app.use(cookieParser());
 
 // Rate limiting is disabled in development/test to allow load testing.
