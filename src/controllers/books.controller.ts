@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import * as xlsx from 'xlsx';
+import ExcelJS from 'exceljs';
 import {
   fetchBooks,
   fetchBookById,
@@ -83,9 +83,30 @@ export async function bulkUploadFile(req: Request, res: Response) {
     throw new AppError(400, 'VALIDATION_ERROR', 'No file uploaded');
   }
 
-  const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
-  const sheetName = workbook.SheetNames[0];
-  const rawItems = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+  const workbook = new ExcelJS.Workbook();
+  // exceljs types lag behind Node.js Buffer generics; cast is safe at runtime
+  await workbook.xlsx.load(req.file.buffer as any);
+
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Spreadsheet has no sheets');
+  }
+
+  // Extract header row then map each data row to an object
+  const headers: string[] = [];
+  worksheet.getRow(1).eachCell((cell) => {
+    headers.push(String(cell.value ?? ''));
+  });
+
+  const rawItems: Record<string, unknown>[] = [];
+  worksheet.eachRow((row, rowIndex) => {
+    if (rowIndex === 1) return; // skip header
+    const obj: Record<string, unknown> = {};
+    row.eachCell({ includeEmpty: true }, (cell, colIndex) => {
+      obj[headers[colIndex - 1]] = cell.value;
+    });
+    rawItems.push(obj);
+  });
 
   const items = rawItems.map((row: any) => ({
     ...row,

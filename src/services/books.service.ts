@@ -312,6 +312,7 @@ export async function bulkCreateBooksService(organizationId: string, items: any[
     total: items.length,
     successful: 0,
     failed: 0,
+    skipped: 0,
     errors: [] as { index: number; isbn: string; reason: string }[],
   };
 
@@ -322,7 +323,9 @@ export async function bulkCreateBooksService(organizationId: string, items: any[
 
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
-    const toCreate: { book: any; copiesCount: number; copyStatus: any }[] = [];
+
+    // Process validations explicitly before DB ops to track errors per row
+    const toCreate: { book: any; copiesCount: number; copyStatus: any; rowCount: number }[] = [];
 
     for (let j = 0; j < batch.length; j++) {
       const data = batch[j];
@@ -344,6 +347,7 @@ export async function bulkCreateBooksService(organizationId: string, items: any[
           book: { ...bookPayload(data), isbn: dataIsbn },
           copiesCount,
           copyStatus,
+          rowCount: 1,
         });
       } catch (err: any) {
         results.failed++;
@@ -363,6 +367,7 @@ export async function bulkCreateBooksService(organizationId: string, items: any[
         if (deduplicatedToCreate.has(item.book.isbn)) {
           const existing = deduplicatedToCreate.get(item.book.isbn)!;
           existing.copiesCount += item.copiesCount;
+          existing.rowCount += item.rowCount;
         } else {
           deduplicatedToCreate.set(item.book.isbn, item);
         }
@@ -380,6 +385,8 @@ export async function bulkCreateBooksService(organizationId: string, items: any[
 
       const newBooks = uniqueToCreate.filter((item) => !existingIsbns.has(item.book.isbn));
       const existingToUpdate = uniqueToCreate.filter((item) => existingIsbns.has(item.book.isbn));
+      const newRowCount = newBooks.reduce((sum, item) => sum + (item.rowCount || 0), 0);
+      const updatedRowCount = existingToUpdate.reduce((sum, item) => sum + (item.rowCount || 0), 0);
 
       if (newBooks.length > 0) {
         const bookChunks = chunkArray(newBooks, dbBatchSize);
@@ -471,7 +478,7 @@ export async function bulkCreateBooksService(organizationId: string, items: any[
 
               if (existingCopiesData.length >= copyBatchSize) {
                 await db.bookCopy.createMany({
-                  data: existingCopiesData.splice(0, existingCopiesData.length),
+                  data: existingCopiesData.splice(0, existingCopiesData.length) as any,
                 });
               }
             }
@@ -492,9 +499,10 @@ export async function bulkCreateBooksService(organizationId: string, items: any[
         }
       }
 
-      results.successful += toCreate.length;
+      results.successful += newRowCount + updatedRowCount;
     } catch (dbErr: any) {
-      results.failed += toCreate.length;
+      const rowCount = toCreate.reduce((sum, item) => sum + (item.rowCount || 0), 0);
+      results.failed += rowCount;
       results.errors.push({
         index: -1,
         isbn: 'batch',

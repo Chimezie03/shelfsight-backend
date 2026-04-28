@@ -65,8 +65,14 @@ export async function getLoans(req: Request, res: Response) {
       ? (rawStatus as 'active' | 'returned' | 'overdue')
       : undefined;
 
+  // PATRONs may only view their own loans — ignore any userId query param they supply.
+  const isPrivileged = req.user?.role === 'ADMIN' || req.user?.role === 'STAFF';
+  const effectiveUserId = isPrivileged
+    ? (typeof userId === 'string' ? userId : undefined)
+    : req.user!.userId;
+
   const loans = await fetchLoans(orgId, {
-    userId: typeof userId === 'string' ? userId : undefined,
+    userId: effectiveUserId,
     status: safeStatus,
     search: typeof search === 'string' ? search : undefined,
     page: parsedPage,

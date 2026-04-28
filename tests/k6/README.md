@@ -40,7 +40,7 @@ npm run test:k6:load -- --profile quick
 
 - `K6_BASE_URL` (default local k6: `http://localhost:3001`, Docker k6: `http://host.docker.internal:3001`)
 - `K6_PASSWORD` (default `password123`)
-- `K6_PROFILE` (`quick` or `task3`, default `task3`)
+- `K6_PROFILE` (`quick`, `task3`, `task4_90`, `task4_135`; default `task3`)
 
 ## Outputs
 

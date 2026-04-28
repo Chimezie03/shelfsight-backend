@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import prisma from '../lib/prisma';
 import { fetchFines, payFine, waiveFine } from '../services/fines.service';
 import { createTransaction } from '../services/transactions.service';
 import { AppError } from '../lib/errors';
@@ -26,8 +27,14 @@ export async function getFines(req: Request, res: Response) {
       ? (rawStatus as 'UNPAID' | 'PAID' | 'WAIVED')
       : undefined;
 
+  // PATRONs may only view their own fines — ignore any userId query param they supply.
+  const isPrivileged = req.user?.role === 'ADMIN' || req.user?.role === 'STAFF';
+  const effectiveUserId = isPrivileged
+    ? (typeof userId === 'string' ? userId : undefined)
+    : req.user!.userId;
+
   const result = await fetchFines(orgId, {
-    userId: typeof userId === 'string' ? userId : undefined,
+    userId: effectiveUserId,
     status: safeStatus,
     search: typeof search === 'string' ? search : undefined,
     page: parsedPage,
@@ -44,6 +51,19 @@ export async function markFinePaid(req: Request, res: Response) {
     throw new AppError(400, 'VALIDATION_ERROR', 'Missing required param: fineId', {
       fieldErrors: { fineId: 'Required' },
     });
+  }
+
+  // PATRONs may only pay their own fines
+  const isPrivileged = req.user?.role === 'ADMIN' || req.user?.role === 'STAFF';
+  if (!isPrivileged) {
+    const existing = await prisma.fine.findFirst({
+      where: { id: fineId, organizationId: orgId },
+      select: { userId: true },
+    });
+    if (!existing) throw new AppError(404, 'NOT_FOUND', 'Fine not found');
+    if (existing.userId !== req.user!.userId) {
+      throw new AppError(403, 'FORBIDDEN', 'Insufficient permissions');
+    }
   }
 
   const fine = await payFine(orgId, fineId);
