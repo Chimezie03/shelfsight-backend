@@ -1,8 +1,12 @@
 import app from './app';
 import fetch from 'node-fetch';
 import { logInfo } from './lib/logger';
+import { validateEnv } from './lib/env';
 
 (globalThis as any).fetch = fetch;
+
+// Fail fast on missing required environment variables
+validateEnv();
 
 const PORT = process.env.PORT || 3001;
 

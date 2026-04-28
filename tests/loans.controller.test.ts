@@ -35,6 +35,7 @@ describe('loans.controller', () => {
         page: '2',
         limit: '25',
       },
+      user: { userId: 'staff-id', role: 'STAFF', name: 'Staff', email: 'staff@test.com' },
     } as unknown as Request;
 
     const json = vi.fn();
