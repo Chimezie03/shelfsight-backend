@@ -1,6 +1,6 @@
-import prisma from '../lib/prisma';
 import bcrypt from 'bcryptjs';
 import type { Role } from '@prisma/client';
+import prisma, { forOrg } from '../lib/prisma';
 import { AppError } from '../lib/errors';
 import { normalizeEmail } from '../lib/email';
 
@@ -14,32 +14,27 @@ const USER_PUBLIC_SELECT = {
   createdAt: true,
 } as const;
 
-// Simple RFC-5322-ish email shape used by the login page and the members admin
-// form. Deliberately permissive (no TLD list) so international + team-local
-// addresses work, strict enough to reject values like "not-an-email".
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-// KAN-59: minimum 8 chars. Matches the length enforced on the frontend login
-// page validator and the password seed (`password123` = 11 chars).
 const MIN_PASSWORD_LENGTH = 8;
 
 function isValidRole(value: unknown): value is Role {
   return typeof value === 'string' && VALID_ROLES.includes(value as Role);
 }
 
-export async function getUsersService(page = 1, limit = 50) {
+export async function getUsersService(organizationId: string, page = 1, limit = 50) {
   const MAX_LIMIT = 100;
   const safePage = Math.max(1, Math.floor(page));
   const safeLimit = Math.min(Math.max(1, Math.floor(limit)), MAX_LIMIT);
+  const db = forOrg(organizationId);
 
-  const [users, total] = await prisma.$transaction([
-    prisma.user.findMany({
+  const [users, total] = await db.$transaction([
+    db.user.findMany({
       select: { ...USER_PUBLIC_SELECT },
       orderBy: { createdAt: 'desc' },
       skip: (safePage - 1) * safeLimit,
       take: safeLimit,
     }),
-    prisma.user.count(),
+    db.user.count(),
   ]);
 
   return {
@@ -53,7 +48,7 @@ export async function getUsersService(page = 1, limit = 50) {
   };
 }
 
-export async function createUserService(data: Record<string, unknown>) {
+export async function createUserService(organizationId: string, data: Record<string, unknown>) {
   const fieldErrors: Record<string, string> = {};
   if (!data.email || typeof data.email !== 'string') fieldErrors.email = 'Required';
   if (!data.password || typeof data.password !== 'string') fieldErrors.password = 'Required';
@@ -96,7 +91,8 @@ export async function createUserService(data: Record<string, unknown>) {
     });
   }
 
-  const existing = await prisma.user.findUnique({ where: { email } });
+  const db = forOrg(organizationId);
+  const existing = await db.user.findFirst({ where: { email } });
   if (existing) {
     throw new AppError(409, 'DUPLICATE_ENTRY', 'A user with this email already exists', {
       fieldErrors: { email: 'Email already in use' },
@@ -104,19 +100,25 @@ export async function createUserService(data: Record<string, unknown>) {
   }
 
   const passwordHash = await bcrypt.hash(rawPassword, 10);
-  return await prisma.user.create({
+  return await db.user.create({
     data: {
       email,
       passwordHash,
       name,
       role: data.role as Role,
-    },
+      // organizationId injected by the scoped client extension
+    } as any,
     select: { ...USER_PUBLIC_SELECT },
   });
 }
 
-export async function updateUserService(id: string, data: Record<string, unknown>) {
-  const existing = await prisma.user.findUnique({ where: { id } });
+export async function updateUserService(
+  organizationId: string,
+  id: string,
+  data: Record<string, unknown>,
+) {
+  const db = forOrg(organizationId);
+  const existing = await db.user.findFirst({ where: { id } });
   if (!existing) {
     throw new AppError(404, 'NOT_FOUND', 'User not found');
   }
@@ -155,7 +157,7 @@ export async function updateUserService(id: string, data: Record<string, unknown
       });
     }
     if (email !== existing.email) {
-      const conflict = await prisma.user.findUnique({ where: { email } });
+      const conflict = await db.user.findFirst({ where: { email } });
       if (conflict) {
         throw new AppError(409, 'DUPLICATE_ENTRY', 'A user with this email already exists', {
           fieldErrors: { email: 'Email already in use' },
@@ -192,15 +194,43 @@ export async function updateUserService(id: string, data: Record<string, unknown
     throw new AppError(400, 'VALIDATION_ERROR', 'No fields to update');
   }
 
-  return await prisma.user.update({
+  // KAN-45: block role-demotion that would leave an org with zero ADMINs.
+  if (updateData.role && existing.role === 'ADMIN' && updateData.role !== 'ADMIN') {
+    const otherAdmins = await db.user.count({
+      where: { role: 'ADMIN', id: { not: id } },
+    });
+    if (otherAdmins === 0) {
+      throw new AppError(409, 'LAST_ADMIN', 'Cannot demote the last administrator', {
+        fieldErrors: { role: 'At least one administrator is required' },
+      });
+    }
+  }
+
+  return await db.user.update({
     where: { id },
     data: updateData,
     select: { ...USER_PUBLIC_SELECT },
   });
 }
 
-export async function deleteUserService(id: string) {
-  return await prisma.user.delete({
-    where: { id },
-  });
+export async function deleteUserService(organizationId: string, id: string) {
+  const db = forOrg(organizationId);
+  const target = await db.user.findFirst({ where: { id } });
+  if (!target) {
+    throw new AppError(404, 'NOT_FOUND', 'User not found');
+  }
+
+  // KAN-45: block deletion that would leave an org with zero ADMINs.
+  if (target.role === 'ADMIN') {
+    const otherAdmins = await db.user.count({
+      where: { role: 'ADMIN', id: { not: id } },
+    });
+    if (otherAdmins === 0) {
+      throw new AppError(409, 'LAST_ADMIN', 'Cannot delete the last administrator');
+    }
+  }
+
+  return await db.user.delete({ where: { id } });
 }
+
+export { prisma };

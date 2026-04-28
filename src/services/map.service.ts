@@ -1,5 +1,5 @@
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
-import prisma from '../lib/prisma';
+import { forOrg } from '../lib/prisma';
 import { AppError } from '../lib/errors';
 
 export interface ShelfSectionPayload {
@@ -28,9 +28,7 @@ const OPTIONAL_STRING_FIELDS = [
 
 const OPTIONAL_INT_FIELDS = ['numberOfTiers', 'capacityPerTier', 'rotation'] as const;
 
-function collectFieldErrors(
-  body: Record<string, unknown>,
-): Record<string, string> | null {
+function collectFieldErrors(body: Record<string, unknown>): Record<string, string> | null {
   const fieldErrors: Record<string, string> = {};
 
   const labelRaw = body.label;
@@ -79,16 +77,12 @@ function parseOptionalFields(o: Record<string, unknown>): Partial<ShelfSectionPa
 
 export function parseShelfSectionPayload(body: unknown): ShelfSectionPayload {
   if (body === null || typeof body !== 'object') {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid request payload', {
-      fieldErrors: {},
-    });
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid request payload', { fieldErrors: {} });
   }
   const o = body as Record<string, unknown>;
   const fieldErrors = collectFieldErrors(o);
   if (fieldErrors) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid request payload', {
-      fieldErrors,
-    });
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid request payload', { fieldErrors });
   }
 
   const label = (o.label as string).trim();
@@ -107,9 +101,7 @@ export function parseShelfSectionPayload(body: unknown): ShelfSectionPayload {
 
 export function parseShelfSectionPartial(body: unknown): Partial<ShelfSectionPayload> {
   if (body === null || typeof body !== 'object') {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid request payload', {
-      fieldErrors: {},
-    });
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid request payload', { fieldErrors: {} });
   }
   const o = body as Record<string, unknown>;
   const out: Partial<ShelfSectionPayload> = {};
@@ -139,18 +131,13 @@ export function parseShelfSectionPartial(body: unknown): Partial<ShelfSectionPay
   }
 
   if (Object.keys(fieldErrors).length > 0) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid request payload', {
-      fieldErrors,
-    });
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid request payload', { fieldErrors });
   }
 
-  // Parse optional fields
   Object.assign(out, parseOptionalFields(o));
 
   if (Object.keys(out).length === 0) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'No valid fields to update', {
-      fieldErrors: {},
-    });
+    throw new AppError(400, 'VALIDATION_ERROR', 'No valid fields to update', { fieldErrors: {} });
   }
 
   return out;
@@ -179,12 +166,10 @@ function toResponse(section: any) {
   };
 }
 
-/**
- * ARCH DECISION: Stable ordering for map rendering — floor ascending, then Y, then X, then label.
- */
-export async function listShelfSections(floor?: number) {
+export async function listShelfSections(organizationId: string, floor?: number) {
   const MAX_SECTIONS = 500;
-  const rows = await prisma.shelfSection.findMany({
+  const db = forOrg(organizationId);
+  const rows = await db.shelfSection.findMany({
     where: floor !== undefined ? { floor } : undefined,
     include: { _count: { select: { copies: true } } },
     orderBy: [{ floor: 'asc' }, { mapY: 'asc' }, { mapX: 'asc' }, { label: 'asc' }],
@@ -193,8 +178,9 @@ export async function listShelfSections(floor?: number) {
   return rows.map(toResponse);
 }
 
-export async function getShelfSectionById(id: string) {
-  const row = await prisma.shelfSection.findUnique({
+export async function getShelfSectionById(organizationId: string, id: string) {
+  const db = forOrg(organizationId);
+  const row = await db.shelfSection.findFirst({
     where: { id },
     include: { _count: { select: { copies: true } } },
   });
@@ -204,8 +190,9 @@ export async function getShelfSectionById(id: string) {
   return toResponse(row);
 }
 
-export async function createShelfSection(payload: ShelfSectionPayload) {
-  const row = await prisma.shelfSection.create({
+export async function createShelfSection(organizationId: string, payload: ShelfSectionPayload) {
+  const db = forOrg(organizationId);
+  const row = await db.shelfSection.create({
     data: {
       label: payload.label,
       mapX: payload.mapX,
@@ -223,15 +210,26 @@ export async function createShelfSection(payload: ShelfSectionPayload) {
       rotation: payload.rotation ?? null,
       notes: payload.notes ?? null,
       shelfType: payload.shelfType ?? null,
-    },
+    } as any,
     include: { _count: { select: { copies: true } } },
   });
   return toResponse(row);
 }
 
-export async function updateShelfSection(id: string, partial: Partial<ShelfSectionPayload>) {
+export async function updateShelfSection(
+  organizationId: string,
+  id: string,
+  partial: Partial<ShelfSectionPayload>,
+) {
+  const db = forOrg(organizationId);
   try {
-    const row = await prisma.shelfSection.update({
+    // Confirm scope first so cross-org IDs return 404 instead of "ok".
+    const exists = await db.shelfSection.findFirst({ where: { id } });
+    if (!exists) {
+      throw new AppError(404, 'SHELF_SECTION_NOT_FOUND', 'Shelf section not found');
+    }
+
+    const row = await db.shelfSection.update({
       where: { id },
       data: partial,
       include: { _count: { select: { copies: true } } },
@@ -245,9 +243,14 @@ export async function updateShelfSection(id: string, partial: Partial<ShelfSecti
   }
 }
 
-export async function deleteShelfSection(id: string) {
+export async function deleteShelfSection(organizationId: string, id: string) {
+  const db = forOrg(organizationId);
   try {
-    await prisma.shelfSection.delete({ where: { id } });
+    const exists = await db.shelfSection.findFirst({ where: { id } });
+    if (!exists) {
+      throw new AppError(404, 'SHELF_SECTION_NOT_FOUND', 'Shelf section not found');
+    }
+    await db.shelfSection.delete({ where: { id } });
   } catch (e) {
     if (e instanceof PrismaClientKnownRequestError && e.code === 'P2025') {
       throw new AppError(404, 'SHELF_SECTION_NOT_FOUND', 'Shelf section not found');
@@ -256,18 +259,14 @@ export async function deleteShelfSection(id: string) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Book copies by shelf
-// ---------------------------------------------------------------------------
-
-export async function getBookCopiesByShelf(shelfId: string) {
-  // Verify the shelf exists
-  const shelf = await prisma.shelfSection.findUnique({ where: { id: shelfId } });
+export async function getBookCopiesByShelf(organizationId: string, shelfId: string) {
+  const db = forOrg(organizationId);
+  const shelf = await db.shelfSection.findFirst({ where: { id: shelfId } });
   if (!shelf) {
     throw new AppError(404, 'SHELF_SECTION_NOT_FOUND', 'Shelf section not found');
   }
 
-  const copies = await prisma.bookCopy.findMany({
+  const copies = await db.bookCopy.findMany({
     where: { shelfId },
     include: {
       book: true,
@@ -302,10 +301,6 @@ export async function getBookCopiesByShelf(shelfId: string) {
   }));
 }
 
-// ---------------------------------------------------------------------------
-// Bulk layout sync
-// ---------------------------------------------------------------------------
-
 interface LayoutSection {
   id?: string | null;
   label: string;
@@ -326,13 +321,13 @@ interface LayoutSection {
   shelfType?: string | null;
 }
 
-export async function syncMapLayout(sections: LayoutSection[]) {
+export async function syncMapLayout(organizationId: string, sections: LayoutSection[]) {
+  const db = forOrg(organizationId);
   const incomingIds = sections
     .filter((s) => s.id && !s.id.startsWith('new-'))
     .map((s) => s.id as string);
 
-  return prisma.$transaction(async (tx) => {
-    // Delete sections not in the incoming array
+  return db.$transaction(async (tx) => {
     if (incomingIds.length > 0) {
       await tx.shelfSection.deleteMany({
         where: { id: { notIn: incomingIds } },
@@ -363,7 +358,6 @@ export async function syncMapLayout(sections: LayoutSection[]) {
       };
 
       if (section.id && !section.id.startsWith('new-')) {
-        // Existing section — update
         const row = await tx.shelfSection.update({
           where: { id: section.id },
           data,
@@ -371,9 +365,8 @@ export async function syncMapLayout(sections: LayoutSection[]) {
         });
         results.push(toResponse(row));
       } else {
-        // New section — create
         const row = await tx.shelfSection.create({
-          data,
+          data: data as any,
           include: { _count: { select: { copies: true } } },
         });
         results.push(toResponse(row));

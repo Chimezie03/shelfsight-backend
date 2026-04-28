@@ -1,4 +1,4 @@
-import prisma from '../lib/prisma';
+import { forOrg } from '../lib/prisma';
 import { AppError } from '../lib/errors';
 
 interface FetchFinesParams {
@@ -39,17 +39,13 @@ const fineInclude = {
   },
 };
 
-export async function fetchFines(params: FetchFinesParams) {
+export async function fetchFines(organizationId: string, params: FetchFinesParams) {
   const { userId, status, search, page = 1, limit = 100 } = params;
+  const db = forOrg(organizationId);
   const whereAnd: any[] = [];
 
-  if (userId) {
-    whereAnd.push({ userId });
-  }
-
-  if (status) {
-    whereAnd.push({ status });
-  }
+  if (userId) whereAnd.push({ userId });
+  if (status) whereAnd.push({ status });
 
   if (search?.trim()) {
     const q = search.trim();
@@ -64,8 +60,8 @@ export async function fetchFines(params: FetchFinesParams) {
 
   const where = whereAnd.length > 0 ? { AND: whereAnd } : {};
 
-  const total = await prisma.fine.count({ where });
-  const fines = await prisma.fine.findMany({
+  const total = await db.fine.count({ where });
+  const fines = await db.fine.findMany({
     where,
     skip: (page - 1) * limit,
     take: limit,
@@ -79,14 +75,15 @@ export async function fetchFines(params: FetchFinesParams) {
   };
 }
 
-export async function payFine(fineId: string) {
-  const fine = await prisma.fine.findUnique({ where: { id: fineId } });
+export async function payFine(organizationId: string, fineId: string) {
+  const db = forOrg(organizationId);
+  const fine = await db.fine.findFirst({ where: { id: fineId } });
   if (!fine) throw new AppError(404, 'NOT_FOUND', 'Fine not found');
   if (fine.status !== 'UNPAID') {
     throw new AppError(409, 'RESOURCE_UNAVAILABLE', `Fine is already ${fine.status.toLowerCase()}`);
   }
 
-  const updated = await prisma.fine.update({
+  const updated = await db.fine.update({
     where: { id: fineId },
     data: { status: 'PAID', paidAt: new Date() },
     include: fineInclude,
@@ -95,14 +92,15 @@ export async function payFine(fineId: string) {
   return mapFineResponse(updated);
 }
 
-export async function waiveFine(fineId: string, waivedByName: string) {
-  const fine = await prisma.fine.findUnique({ where: { id: fineId } });
+export async function waiveFine(organizationId: string, fineId: string, waivedByName: string) {
+  const db = forOrg(organizationId);
+  const fine = await db.fine.findFirst({ where: { id: fineId } });
   if (!fine) throw new AppError(404, 'NOT_FOUND', 'Fine not found');
   if (fine.status !== 'UNPAID') {
     throw new AppError(409, 'RESOURCE_UNAVAILABLE', `Fine is already ${fine.status.toLowerCase()}`);
   }
 
-  const updated = await prisma.fine.update({
+  const updated = await db.fine.update({
     where: { id: fineId },
     data: { status: 'WAIVED', waivedBy: waivedByName },
     include: fineInclude,
@@ -112,13 +110,15 @@ export async function waiveFine(fineId: string, waivedByName: string) {
 }
 
 export async function createFineForLoan(
+  organizationId: string,
   loanId: string,
   userId: string,
   amount: number,
   reason = 'Overdue',
 ) {
-  return prisma.fine.create({
-    data: { loanId, userId, amount, reason },
+  const db = forOrg(organizationId);
+  return db.fine.create({
+    data: { loanId, userId, amount, reason } as any,
     include: fineInclude,
   });
 }

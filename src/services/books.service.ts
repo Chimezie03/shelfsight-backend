@@ -1,5 +1,5 @@
 import type { Book, BookCopy, Prisma, ShelfSection } from '@prisma/client';
-import prisma from '../lib/prisma';
+import { forOrg } from '../lib/prisma';
 import { AppError } from '../lib/errors';
 
 type CopyWithShelf = BookCopy & { shelf: ShelfSection | null };
@@ -76,7 +76,6 @@ const bookPayload = (data: any) => ({
 
 /** Matches list-item shape expected by frontend `BackendBook` / catalog transforms. */
 export function mapBookWithCopies(book: Book & { copies: CopyWithShelf[] }) {
-  // Find the first copy that has a shelf assigned to derive location
   const shelfCopy = book.copies.find((c) => c.shelf);
   const shelf = shelfCopy?.shelf ?? null;
 
@@ -103,13 +102,11 @@ export function mapBookWithCopies(book: Book & { copies: CopyWithShelf[] }) {
   };
 }
 
-/** Map frontend copy status strings to DB CopyStatus enum values. */
 function mapCopyStatus(status: string | undefined): 'AVAILABLE' | 'PROCESSING' {
   if (status === 'maintenance') return 'PROCESSING';
   return 'AVAILABLE';
 }
 
-/** Validate a raw ISBN string (10 or 13 digits, hyphens stripped). */
 function validateIsbn(isbn: string): string | null {
   const clean = String(isbn).replace(/-/g, '');
   if (!/^\d{10}$/.test(clean) && !/^\d{13}$/.test(clean)) {
@@ -119,25 +116,17 @@ function validateIsbn(isbn: string): string | null {
 }
 
 function parseDeweyBucket(deweyDecimal: string | null): number | null {
-  if (!deweyDecimal) {
-    return null;
-  }
+  if (!deweyDecimal) return null;
   const match = String(deweyDecimal).match(/\d{1,3}/);
-  if (!match) {
-    return null;
-  }
+  if (!match) return null;
   const parsed = Number.parseInt(match[0], 10);
   return Number.isNaN(parsed) ? null : parsed;
 }
 
 function extractPublishYear(value: string | null): number | null {
-  if (!value) {
-    return null;
-  }
+  if (!value) return null;
   const match = String(value).match(/\d{4}/);
-  if (!match) {
-    return null;
-  }
+  if (!match) return null;
   const parsed = Number.parseInt(match[0], 10);
   return Number.isNaN(parsed) ? null : parsed;
 }
@@ -147,15 +136,9 @@ function toCatalogStatus(book: {
   processingCopies: number;
   totalCopies: number;
 }): CatalogStatus {
-  if (book.availableCopies > 0) {
-    return 'available';
-  }
-  if (book.processingCopies > 0) {
-    return 'maintenance';
-  }
-  if (book.totalCopies > 0) {
-    return 'checked-out';
-  }
+  if (book.availableCopies > 0) return 'available';
+  if (book.processingCopies > 0) return 'maintenance';
+  if (book.totalCopies > 0) return 'checked-out';
   return 'available';
 }
 
@@ -200,20 +183,15 @@ function compareValues(a: number | string, b: number | string, direction: SortDi
 }
 
 function matchesCategoryFilter(book: { deweyDecimal: string | null; genre: string | null }, category?: string): boolean {
-  if (!category || category === 'all') {
-    return true;
-  }
+  if (!category || category === 'all') return true;
 
   const deweyRange = CATEGORY_RANGES[category];
   if (deweyRange) {
     const deweyBucket = parseDeweyBucket(book.deweyDecimal);
-    if (deweyBucket === null) {
-      return false;
-    }
+    if (deweyBucket === null) return false;
     return deweyBucket >= deweyRange[0] && deweyBucket <= deweyRange[1];
   }
 
-  // Fallback if category strings ever diverge from Dewey labels.
   return (book.genre ?? '').toLowerCase().includes(category.toLowerCase());
 }
 
@@ -221,29 +199,16 @@ function matchesYearFilter(publishYear: string | null, yearMin?: number, yearMax
   const normalizedMin = Number.isFinite(yearMin) ? Number(yearMin) : null;
   const normalizedMax = Number.isFinite(yearMax) ? Number(yearMax) : null;
 
-  if (normalizedMin === null && normalizedMax === null) {
-    return true;
-  }
+  if (normalizedMin === null && normalizedMax === null) return true;
 
   const year = extractPublishYear(publishYear);
-  if (year === null) {
-    return false;
-  }
+  if (year === null) return false;
 
-  if (normalizedMin !== null && year < normalizedMin) {
-    return false;
-  }
-  if (normalizedMax !== null && year > normalizedMax) {
-    return false;
-  }
+  if (normalizedMin !== null && year < normalizedMin) return false;
+  if (normalizedMax !== null && year > normalizedMax) return false;
   return true;
 }
 
-/**
- * Translate a frontend catalog status string into a Prisma WHERE filter on copies.
- * This allows status filtering to run entirely in the database instead of loading
- * all books into memory.
- */
 function buildStatusFilter(status: CatalogStatus): Prisma.BookWhereInput {
   if (status === 'available') {
     return { copies: { some: { status: 'AVAILABLE' } } };
@@ -256,7 +221,6 @@ function buildStatusFilter(status: CatalogStatus): Prisma.BookWhereInput {
       ],
     };
   }
-  // checked-out: has copies, none of which are AVAILABLE or PROCESSING
   return {
     AND: [
       { copies: { some: {} } },
@@ -269,20 +233,13 @@ function buildDbOrderBy(
   sortField: CatalogSortField | null,
   direction: SortDirection,
 ): Prisma.BookOrderByWithRelationInput[] {
-  if (sortField === 'title') {
-    return [{ title: direction }, { createdAt: 'desc' }];
-  }
-  if (sortField === 'author') {
-    return [{ author: direction }, { createdAt: 'desc' }];
-  }
-  if (sortField === 'publishYear') {
-    return [{ publishYear: direction }, { createdAt: 'desc' }];
-  }
-
+  if (sortField === 'title') return [{ title: direction }, { createdAt: 'desc' }];
+  if (sortField === 'author') return [{ author: direction }, { createdAt: 'desc' }];
+  if (sortField === 'publishYear') return [{ publishYear: direction }, { createdAt: 'desc' }];
   return [{ createdAt: direction }];
 }
 
-export async function createBookService(data: any) {
+export async function createBookService(organizationId: string, data: any) {
   const fieldErrors: Record<string, string> = {};
   if (!data.title) fieldErrors.title = 'Required';
   if (!data.author) fieldErrors.author = 'Required';
@@ -297,7 +254,9 @@ export async function createBookService(data: any) {
     throw new AppError(400, 'VALIDATION_ERROR', 'Validation failed', { fieldErrors });
   }
 
-  const existing = await prisma.book.findUnique({ where: { isbn: data.isbn } });
+  const db = forOrg(organizationId);
+
+  const existing = await db.book.findFirst({ where: { isbn: data.isbn } });
   if (existing) {
     throw new AppError(409, 'DUPLICATE_ENTRY', 'A book with this ISBN already exists in the catalog', {
       fieldErrors: { isbn: 'This ISBN is already in the catalog' },
@@ -308,7 +267,7 @@ export async function createBookService(data: any) {
   const copyStatus = mapCopyStatus(data.status);
   const cleanIsbn = String(data.isbn).replace(/-/g, '');
 
-  const book = await prisma.book.create({
+  const book = await db.book.create({
     data: {
       ...bookPayload(data),
       copies:
@@ -317,20 +276,23 @@ export async function createBookService(data: any) {
               create: Array.from({ length: copiesCount }, (_, i) => ({
                 barcode: `${cleanIsbn}-${i + 1}`,
                 status: copyStatus,
+                organizationId,
               })),
             }
           : undefined,
-    },
+    } as any,
     include: { copies: { include: { shelf: true } } },
   });
 
   return mapBookWithCopies(book);
 }
 
-export async function bulkCreateBooksService(items: any[]) {
+export async function bulkCreateBooksService(organizationId: string, items: any[]) {
   if (!Array.isArray(items)) {
     throw new AppError(400, 'VALIDATION_ERROR', 'Payload must be an array of book objects');
   }
+
+  const db = forOrg(organizationId);
 
   const results = {
     total: items.length,
@@ -343,10 +305,9 @@ export async function bulkCreateBooksService(items: any[]) {
   const dbBatchSize = toPositiveInt(process.env.BULK_UPLOAD_DB_BATCH_SIZE, 200);
   const copyBatchSize = toPositiveInt(process.env.BULK_UPLOAD_COPY_BATCH_SIZE, 1000);
   const updateBatchSize = toPositiveInt(process.env.BULK_UPLOAD_UPDATE_BATCH_SIZE, 100);
+
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
-
-    // Process validations explicitly before DB ops to track errors per row
     const toCreate: { book: any; copiesCount: number; copyStatus: any }[] = [];
 
     for (let j = 0; j < batch.length; j++) {
@@ -362,7 +323,7 @@ export async function bulkCreateBooksService(items: any[]) {
         const isbnErr = validateIsbn(dataIsbn);
         if (isbnErr) throw new Error(isbnErr);
 
-        const copiesCount = Math.max(0, parseInt(data.copies) || 1); // default 1 copy if bulk uploaded
+        const copiesCount = Math.max(0, parseInt(data.copies) || 1);
         const copyStatus = mapCopyStatus(data.status);
 
         toCreate.push({
@@ -383,8 +344,6 @@ export async function bulkCreateBooksService(items: any[]) {
     if (toCreate.length === 0) continue;
 
     try {
-      // Deduplicate by ISBN within the batch to prevent unique constraint errors 
-      // and sum up the copies.
       const deduplicatedToCreate = new Map<string, any>();
       for (const item of toCreate) {
         if (deduplicatedToCreate.has(item.book.isbn)) {
@@ -398,9 +357,9 @@ export async function bulkCreateBooksService(items: any[]) {
 
       const isbns = uniqueToCreate.map((item) => item.book.isbn);
       const uniqueIsbns = [...new Set(isbns)];
-      const existingBooks = await prisma.book.findMany({
+      const existingBooks = await db.book.findMany({
         where: { isbn: { in: uniqueIsbns } },
-        select: { id: true, isbn: true }
+        select: { id: true, isbn: true },
       });
       const existingIsbns = new Set(existingBooks.map((b) => b.isbn));
       const existingByIsbn = new Map(existingBooks.map((b) => [b.isbn, b]));
@@ -411,7 +370,7 @@ export async function bulkCreateBooksService(items: any[]) {
       if (newBooks.length > 0) {
         const bookChunks = chunkArray(newBooks, dbBatchSize);
         for (const chunk of bookChunks) {
-          await prisma.book.createMany({
+          await db.book.createMany({
             data: chunk.map((item) => ({
               title: item.book.title,
               author: item.book.author,
@@ -422,16 +381,15 @@ export async function bulkCreateBooksService(items: any[]) {
               coverImageUrl: item.book.coverImageUrl,
               publishYear: item.book.publishYear,
               pageCount: item.book.pageCount,
-            })),
+            })) as any,
             skipDuplicates: true,
           });
         }
 
-        // Get newly created book IDs for copies mapping
         const createdIsbns = [...new Set(newBooks.map((b) => b.book.isbn))];
-        const newlyCreatedBooks = await prisma.book.findMany({
+        const newlyCreatedBooks = await db.book.findMany({
           where: { isbn: { in: createdIsbns } },
-          select: { id: true, isbn: true }
+          select: { id: true, isbn: true },
         });
         const createdByIsbn = new Map(newlyCreatedBooks.map((b) => [b.isbn, b]));
 
@@ -450,8 +408,8 @@ export async function bulkCreateBooksService(items: any[]) {
                 });
 
                 if (newCopiesData.length >= copyBatchSize) {
-                  await prisma.bookCopy.createMany({
-                    data: newCopiesData.splice(0, newCopiesData.length),
+                  await db.bookCopy.createMany({
+                    data: newCopiesData.splice(0, newCopiesData.length) as any,
                   });
                 }
               }
@@ -460,8 +418,8 @@ export async function bulkCreateBooksService(items: any[]) {
         }
 
         if (newCopiesData.length > 0) {
-          await prisma.bookCopy.createMany({
-            data: newCopiesData,
+          await db.bookCopy.createMany({
+            data: newCopiesData as any,
           });
         }
       }
@@ -473,7 +431,7 @@ export async function bulkCreateBooksService(items: any[]) {
         const dbBook = existingByIsbn.get(item.book.isbn);
         if (dbBook) {
           updates.push(
-            prisma.book.update({
+            db.book.update({
               where: { id: dbBook.id },
               data: {
                 title: item.book.title,
@@ -484,8 +442,8 @@ export async function bulkCreateBooksService(items: any[]) {
                 deweyDecimal: item.book.deweyDecimal,
                 language: item.book.language,
                 coverImageUrl: item.book.coverImageUrl,
-              }
-            })
+              },
+            }),
           );
 
           if (item.copiesCount > 0) {
@@ -498,7 +456,7 @@ export async function bulkCreateBooksService(items: any[]) {
               });
 
               if (existingCopiesData.length >= copyBatchSize) {
-                await prisma.bookCopy.createMany({
+                await db.bookCopy.createMany({
                   data: existingCopiesData.splice(0, existingCopiesData.length),
                 });
               }
@@ -508,15 +466,15 @@ export async function bulkCreateBooksService(items: any[]) {
       }
 
       if (existingCopiesData.length > 0) {
-        await prisma.bookCopy.createMany({
-          data: existingCopiesData.splice(0, existingCopiesData.length),
+        await db.bookCopy.createMany({
+          data: existingCopiesData.splice(0, existingCopiesData.length) as any,
         });
       }
 
       if (updates.length > 0) {
         const updateChunks = chunkArray(updates, updateBatchSize);
         for (const chunk of updateChunks) {
-          await prisma.$transaction(chunk);
+          await db.$transaction(chunk);
         }
       }
 
@@ -534,7 +492,7 @@ export async function bulkCreateBooksService(items: any[]) {
   return results;
 }
 
-export async function updateBookService(id: string, data: any) {
+export async function updateBookService(organizationId: string, id: string, data: any) {
   if (data.isbn) {
     const isbnErr = validateIsbn(data.isbn);
     if (isbnErr) {
@@ -544,21 +502,21 @@ export async function updateBookService(id: string, data: any) {
     }
   }
 
-  const book = await prisma.$transaction(async (tx) => {
+  const db = forOrg(organizationId);
+
+  const book = await db.$transaction(async (tx) => {
     const updated = await tx.book.update({
       where: { id },
       data: bookPayload(data),
       include: { copies: { include: { shelf: true } } },
     });
 
-    // Handle copies count change if provided
     if (data.copies != null) {
       const desiredCount = Math.max(0, parseInt(data.copies) || 0);
       const currentCopies = updated.copies;
       const currentCount = currentCopies.length;
 
       if (desiredCount > currentCount) {
-        // Add new copies
         const toAdd = desiredCount - currentCount;
         const cleanIsbn = String(updated.isbn).replace(/-/g, '');
         const ts = Date.now();
@@ -567,10 +525,9 @@ export async function updateBookService(id: string, data: any) {
             bookId: id,
             barcode: `${cleanIsbn}-${ts}-${i + 1}`,
             status: 'AVAILABLE' as const,
-          })),
+          })) as any,
         });
       } else if (desiredCount < currentCount) {
-        // Remove excess copies — prefer AVAILABLE ones, never remove CHECKED_OUT
         const available = currentCopies.filter((c) => c.status === 'AVAILABLE');
         const toRemove = currentCount - desiredCount;
         const removable = available.slice(0, toRemove);
@@ -582,7 +539,6 @@ export async function updateBookService(id: string, data: any) {
       }
     }
 
-    // If a shelfId was provided, assign all AVAILABLE copies to that shelf
     if (data.shelfId) {
       await tx.bookCopy.updateMany({
         where: { bookId: id, status: 'AVAILABLE' },
@@ -590,7 +546,7 @@ export async function updateBookService(id: string, data: any) {
       });
     }
 
-    return tx.book.findUniqueOrThrow({
+    return tx.book.findFirstOrThrow({
       where: { id },
       include: { copies: { include: { shelf: true } } },
     });
@@ -599,18 +555,20 @@ export async function updateBookService(id: string, data: any) {
   return mapBookWithCopies(book);
 }
 
-export async function deleteBookService(id: string) {
-  return await prisma.$transaction(async (tx) => {
-    // Fetch all copy IDs for this book
+export async function deleteBookService(organizationId: string, id: string) {
+  const db = forOrg(organizationId);
+  return await db.$transaction(async (tx) => {
     const copies = await tx.bookCopy.findMany({
       where: { bookId: id },
       select: { id: true },
     });
     const copyIds = copies.map((c) => c.id);
 
-    // Delete dependents of each copy first
     if (copyIds.length > 0) {
-      await tx.bookCopyEvent.deleteMany({ where: { bookCopyId: { in: copyIds } } });
+      // BookCopyEvent is unscoped (audit trail keyed off bookCopy.organizationId).
+      // Use a raw deleteMany via the base client through `tx` with the bookCopyId
+      // constraint, which is fine since the copies were already org-scoped.
+      await (tx as any).bookCopyEvent.deleteMany({ where: { bookCopyId: { in: copyIds } } });
       await tx.loan.deleteMany({ where: { bookCopyId: { in: copyIds } } });
       await tx.bookCopy.deleteMany({ where: { bookId: id } });
     }
@@ -619,7 +577,7 @@ export async function deleteBookService(id: string) {
   });
 }
 
-export async function fetchBooks(params: FetchBooksParams) {
+export async function fetchBooks(organizationId: string, params: FetchBooksParams) {
   const {
     search,
     title,
@@ -643,20 +601,13 @@ export async function fetchBooks(params: FetchBooksParams) {
   const normalizedSortField = normalizeSortField(sortBy);
   const normalizedSortDirection = normalizeSortDirection(sortDir);
 
+  const db = forOrg(organizationId);
   const whereClauses: Prisma.BookWhereInput[] = [];
 
-  if (title) {
-    whereClauses.push({ title: { contains: title, mode: 'insensitive' } });
-  }
-  if (author) {
-    whereClauses.push({ author: { contains: author, mode: 'insensitive' } });
-  }
-  if (isbn) {
-    whereClauses.push({ isbn: { contains: isbn, mode: 'insensitive' } });
-  }
-  if (genre) {
-    whereClauses.push({ genre: { contains: genre, mode: 'insensitive' } });
-  }
+  if (title) whereClauses.push({ title: { contains: title, mode: 'insensitive' } });
+  if (author) whereClauses.push({ author: { contains: author, mode: 'insensitive' } });
+  if (isbn) whereClauses.push({ isbn: { contains: isbn, mode: 'insensitive' } });
+  if (genre) whereClauses.push({ genre: { contains: genre, mode: 'insensitive' } });
   if (language && language !== 'all') {
     whereClauses.push({ language: { equals: language, mode: 'insensitive' } });
   }
@@ -687,15 +638,13 @@ export async function fetchBooks(params: FetchBooksParams) {
 
   if (!requiresInMemoryPass) {
     const [total, books] = await Promise.all([
-      prisma.book.count({ where }),
-      prisma.book.findMany({
+      db.book.count({ where }),
+      db.book.findMany({
         where,
         skip: (safePage - 1) * safeLimit,
         take: safeLimit,
         orderBy: buildDbOrderBy(normalizedSortField, normalizedSortDirection),
-        include: {
-          copies: { include: { shelf: true } },
-        },
+        include: { copies: { include: { shelf: true } } },
       }),
     ]);
 
@@ -710,12 +659,10 @@ export async function fetchBooks(params: FetchBooksParams) {
     };
   }
 
-  const books = await prisma.book.findMany({
+  const books = await db.book.findMany({
     where,
     orderBy: { createdAt: 'desc' },
-    include: {
-      copies: { include: { shelf: true } },
-    },
+    include: { copies: { include: { shelf: true } } },
   });
 
   let filtered = books.map(mapBookWithCopies);
@@ -732,12 +679,8 @@ export async function fetchBooks(params: FetchBooksParams) {
     const direction = normalizedSortDirection;
 
     filtered = [...filtered].sort((a, b) => {
-      if (normalizedSortField === 'title') {
-        return compareValues(a.title, b.title, direction);
-      }
-      if (normalizedSortField === 'author') {
-        return compareValues(a.author, b.author, direction);
-      }
+      if (normalizedSortField === 'title') return compareValues(a.title, b.title, direction);
+      if (normalizedSortField === 'author') return compareValues(a.author, b.author, direction);
       if (normalizedSortField === 'dewey') {
         const aDewey = parseDeweyBucket(a.deweyDecimal) ?? Number.NEGATIVE_INFINITY;
         const bDewey = parseDeweyBucket(b.deweyDecimal) ?? Number.NEGATIVE_INFINITY;
@@ -756,8 +699,6 @@ export async function fetchBooks(params: FetchBooksParams) {
         };
         return compareValues(rank[toCatalogStatus(a)], rank[toCatalogStatus(b)], direction);
       }
-
-      // dateAdded maps to createdAt
       return compareValues(a.createdAt.getTime(), b.createdAt.getTime(), direction);
     });
   }
@@ -777,8 +718,9 @@ export async function fetchBooks(params: FetchBooksParams) {
   };
 }
 
-export async function fetchBookById(id: string) {
-  const book = await prisma.book.findUnique({
+export async function fetchBookById(organizationId: string, id: string) {
+  const db = forOrg(organizationId);
+  const book = await db.book.findFirst({
     where: { id },
     include: { copies: { include: { shelf: true } } },
   });

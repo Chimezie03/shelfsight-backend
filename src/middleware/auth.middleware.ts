@@ -10,34 +10,26 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = req.cookies?.token;
 
   if (!token) {
-    return next(
-      new AppError(401, 'UNAUTHORIZED', 'Not authenticated'),
-    );
+    return next(new AppError(401, 'UNAUTHORIZED', 'Not authenticated'));
   }
 
   try {
-    const payload = verifyToken(token);
-    (req as any).user = payload;
+    req.user = verifyToken(token);
     next();
   } catch {
-    return next(
-      new AppError(401, 'UNAUTHORIZED', 'Invalid or expired token'),
-    );
+    return next(new AppError(401, 'UNAUTHORIZED', 'Invalid or expired token'));
   }
 }
 
 /**
- * Role-based access control middleware.
- * Must be used after `requireAuth`.
+ * Role-based access control middleware. Must be used after `requireAuth`.
  */
 export function requireRole(...allowedRoles: string[]) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const userRole = (req as any).user?.role;
+    const userRole = req.user?.role;
 
     if (!userRole || !allowedRoles.includes(userRole)) {
-      return next(
-        new AppError(403, 'FORBIDDEN', 'Insufficient permissions'),
-      );
+      return next(new AppError(403, 'FORBIDDEN', 'Insufficient permissions'));
     }
 
     next();

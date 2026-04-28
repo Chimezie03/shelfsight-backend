@@ -1,28 +1,32 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../src/lib/prisma', () => ({
-  default: {
-    loan: {
-      count: vi.fn(),
-      findMany: vi.fn(),
-    },
+const { loanMock } = vi.hoisted(() => ({
+  loanMock: {
+    count: vi.fn(),
+    findMany: vi.fn(),
   },
 }));
 
-import prisma from '../src/lib/prisma';
+vi.mock('../src/lib/prisma', () => ({
+  default: { loan: loanMock },
+  forOrg: () => ({ loan: loanMock }),
+}));
+
 import { fetchLoans } from '../src/services/loans.service';
+
+const ORG_ID = 'org-1';
 
 describe('loans.service fetchLoans', () => {
   beforeEach(() => {
-    vi.mocked(prisma.loan.count).mockReset();
-    vi.mocked(prisma.loan.findMany).mockReset();
+    loanMock.count.mockReset();
+    loanMock.findMany.mockReset();
   });
 
   it('builds search filters for title, author, and isbn with active status', async () => {
-    vi.mocked(prisma.loan.count).mockResolvedValue(1);
-    vi.mocked(prisma.loan.findMany).mockResolvedValue([] as any);
+    loanMock.count.mockResolvedValue(1);
+    loanMock.findMany.mockResolvedValue([] as any);
 
-    await fetchLoans({
+    await fetchLoans(ORG_ID, {
       userId: 'user-1',
       status: 'active',
       search: '  dune  ',
@@ -30,7 +34,7 @@ describe('loans.service fetchLoans', () => {
       limit: 5,
     });
 
-    expect(prisma.loan.count).toHaveBeenCalledWith({
+    expect(loanMock.count).toHaveBeenCalledWith({
       where: {
         AND: expect.arrayContaining([
           { userId: 'user-1' },
@@ -69,8 +73,8 @@ describe('loans.service fetchLoans', () => {
     const dueDate = new Date('2026-04-30T00:00:00.000Z');
     const checkedOutAt = new Date('2026-04-01T00:00:00.000Z');
 
-    vi.mocked(prisma.loan.count).mockResolvedValue(1);
-    vi.mocked(prisma.loan.findMany).mockResolvedValue([
+    loanMock.count.mockResolvedValue(1);
+    loanMock.findMany.mockResolvedValue([
       {
         id: 'loan-1',
         user: { id: 'user-1', name: 'Paul Atreides', email: 'paul@example.com' },
@@ -91,7 +95,7 @@ describe('loans.service fetchLoans', () => {
       },
     ] as any);
 
-    const result = await fetchLoans({ search: '9780441172719' });
+    const result = await fetchLoans(ORG_ID, { search: '9780441172719' });
     const loan = result.data[0];
 
     expect(loan.book.isbn).toBe('9780441172719');

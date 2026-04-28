@@ -1,4 +1,4 @@
-import prisma from '../lib/prisma';
+import { forOrg } from '../lib/prisma';
 import type { TransactionType } from '@prisma/client';
 
 interface FetchTransactionsParams {
@@ -24,13 +24,12 @@ function mapTransactionResponse(tx: any) {
   };
 }
 
-export async function fetchTransactions(params: FetchTransactionsParams) {
+export async function fetchTransactions(organizationId: string, params: FetchTransactionsParams) {
   const { type, search, dateFrom, dateTo, page = 1, limit = 20 } = params;
+  const db = forOrg(organizationId);
   const whereAnd: any[] = [];
 
-  if (type) {
-    whereAnd.push({ type });
-  }
+  if (type) whereAnd.push({ type });
 
   if (search?.trim()) {
     const q = search.trim();
@@ -44,10 +43,7 @@ export async function fetchTransactions(params: FetchTransactionsParams) {
     });
   }
 
-  if (dateFrom) {
-    whereAnd.push({ createdAt: { gte: new Date(dateFrom) } });
-  }
-
+  if (dateFrom) whereAnd.push({ createdAt: { gte: new Date(dateFrom) } });
   if (dateTo) {
     const end = new Date(dateTo);
     end.setDate(end.getDate() + 1);
@@ -56,8 +52,8 @@ export async function fetchTransactions(params: FetchTransactionsParams) {
 
   const where = whereAnd.length > 0 ? { AND: whereAnd } : {};
 
-  const total = await prisma.transactionLog.count({ where });
-  const transactions = await prisma.transactionLog.findMany({
+  const total = await db.transactionLog.count({ where });
+  const transactions = await db.transactionLog.findMany({
     where,
     skip: (page - 1) * limit,
     take: limit,
@@ -70,14 +66,18 @@ export async function fetchTransactions(params: FetchTransactionsParams) {
   };
 }
 
-export async function createTransaction(data: {
-  type: TransactionType;
-  loanId?: string;
-  bookTitle: string;
-  memberName: string;
-  memberNumber: string;
-  processedBy: string;
-  details: string;
-}) {
-  return prisma.transactionLog.create({ data });
+export async function createTransaction(
+  organizationId: string,
+  data: {
+    type: TransactionType;
+    loanId?: string;
+    bookTitle: string;
+    memberName: string;
+    memberNumber: string;
+    processedBy: string;
+    details: string;
+  },
+) {
+  const db = forOrg(organizationId);
+  return db.transactionLog.create({ data: data as any });
 }

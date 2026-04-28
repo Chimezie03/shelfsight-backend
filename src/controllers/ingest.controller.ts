@@ -10,6 +10,7 @@ import {
   normalizeIsbn,
   classifyDeweyDecimal,
   extractMetadataFromOcr,
+  createIngestionJob,
   listIngestionJobs,
   getIngestionJobById,
   approveIngestionJob,
@@ -17,8 +18,14 @@ import {
   type BookMetadata,
 } from '../services/ingest.service';
 import { AppError } from '../lib/errors';
-import prisma from '../lib/prisma';
 import type { IngestionStatus } from '@prisma/client';
+
+function requireOrg(req: Request): string {
+  if (!req.user) {
+    throw new AppError(401, 'UNAUTHORIZED', 'Not authenticated');
+  }
+  return req.user.organizationId;
+}
 
 const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'image/tiff'];
 
@@ -75,7 +82,10 @@ function extractBatchFiles(req: Request): Express.Multer.File[] {
   return req.file ? [req.file] : [];
 }
 
-async function processSingleImage(file: Express.Multer.File): Promise<ProcessedIngestionResult> {
+async function processSingleImage(
+  organizationId: string,
+  file: Express.Multer.File,
+): Promise<ProcessedIngestionResult> {
   ensureAllowedMime(file);
 
   const s3Result = await uploadImageToS3(file.buffer, file.originalname, file.mimetype);
@@ -148,24 +158,22 @@ async function processSingleImage(file: Express.Multer.File): Promise<ProcessedI
     };
   }
 
-  const job = await prisma.ingestionJob.create({
-    data: {
-      imageUrl: s3Result.url,
-      status: 'COMPLETED',
-      ocrText: ocrText || null,
-      detectedIsbn,
-      suggestedDewey: dewey.dewey_class,
-      confidenceScore: dewey.confidence_score,
-      suggestedTitle: metadata.title,
-      suggestedAuthor: metadata.author,
-      suggestedPublisher: metadata.publisher,
-      suggestedPublishDate: metadata.publishDate,
-      suggestedGenre: metadata.subjects[0] || null,
-      coverImageUrl: metadata.coverImageUrl,
-      metadataSource: metadata.source,
-      deweyReasoning: dewey.reasoning,
-      language,
-    },
+  const job = await createIngestionJob(organizationId, {
+    imageUrl: s3Result.url,
+    status: 'COMPLETED',
+    ocrText: ocrText || null,
+    detectedIsbn,
+    suggestedDewey: dewey.dewey_class,
+    confidenceScore: dewey.confidence_score,
+    suggestedTitle: metadata.title,
+    suggestedAuthor: metadata.author,
+    suggestedPublisher: metadata.publisher,
+    suggestedPublishDate: metadata.publishDate,
+    suggestedGenre: metadata.subjects[0] || null,
+    coverImageUrl: metadata.coverImageUrl,
+    metadataSource: metadata.source,
+    deweyReasoning: dewey.reasoning,
+    language,
   });
 
   return {
@@ -206,6 +214,7 @@ async function processSingleImage(file: Express.Multer.File): Promise<ProcessedI
  *   6. Return aggregated result for human review
  */
 export async function analyzeBookImage(req: Request, res: Response) {
+  const orgId = requireOrg(req);
   const file = req.file;
   if (!file) {
     throw new AppError(
@@ -217,7 +226,7 @@ export async function analyzeBookImage(req: Request, res: Response) {
       },
     );
   }
-  const result = await processSingleImage(file);
+  const result = await processSingleImage(orgId, file);
 
   res.status(200).json({
     success: true,
@@ -226,6 +235,7 @@ export async function analyzeBookImage(req: Request, res: Response) {
 }
 
 export async function analyzeBookImagesBatch(req: Request, res: Response) {
+  const orgId = requireOrg(req);
   const files = extractBatchFiles(req);
   if (files.length === 0) {
     throw new AppError(
@@ -264,7 +274,7 @@ export async function analyzeBookImagesBatch(req: Request, res: Response) {
   for (let i = 0; i < files.length; i += 1) {
     const file = files[i];
     try {
-      const data = await processSingleImage(file);
+      const data = await processSingleImage(orgId, file);
       results.push({
         index: i,
         originalName: file.originalname,
@@ -353,11 +363,12 @@ export async function lookupBookByIsbn(req: Request, res: Response) {
 // ---------------------------------------------------------------------------
 
 export async function listJobs(req: Request, res: Response) {
+  const orgId = requireOrg(req);
   const status = req.query.status as IngestionStatus | undefined;
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
 
-  const result = await listIngestionJobs({ status, page, limit });
+  const result = await listIngestionJobs(orgId, { status, page, limit });
 
   res.status(200).json({
     success: true,
@@ -367,11 +378,13 @@ export async function listJobs(req: Request, res: Response) {
 }
 
 export async function getJob(req: Request, res: Response) {
-  const job = await getIngestionJobById(req.params.id);
+  const orgId = requireOrg(req);
+  const job = await getIngestionJobById(orgId, req.params.id);
   res.status(200).json({ success: true, data: job });
 }
 
 export async function approveJob(req: Request, res: Response) {
+  const orgId = requireOrg(req);
   const { title, author, isbn, genre, deweyDecimal, coverImageUrl, publishYear, language } =
     req.body;
 
@@ -385,8 +398,9 @@ export async function approveJob(req: Request, res: Response) {
     });
   }
 
-  const reviewedBy = (req as any).user?.userId || 'unknown';
+  const reviewedBy = req.user?.userId || 'unknown';
   const result = await approveIngestionJob(
+    orgId,
     req.params.id,
     { title, author, isbn, genre, deweyDecimal, coverImageUrl, publishYear, language },
     reviewedBy,
@@ -396,7 +410,8 @@ export async function approveJob(req: Request, res: Response) {
 }
 
 export async function rejectJob(req: Request, res: Response) {
-  const reviewedBy = (req as any).user?.userId || 'unknown';
-  const job = await rejectIngestionJob(req.params.id, reviewedBy);
+  const orgId = requireOrg(req);
+  const reviewedBy = req.user?.userId || 'unknown';
+  const job = await rejectIngestionJob(orgId, req.params.id, reviewedBy);
   res.status(200).json({ success: true, data: job });
 }
