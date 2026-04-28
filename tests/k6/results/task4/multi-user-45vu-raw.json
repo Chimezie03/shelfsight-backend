@@ -1,0 +1,513 @@
+{
+  "metrics": {
+    "circulation_flow_duration": {
+      "thresholds": {
+        "p(95)<2500": {
+          "ok": false
+        }
+      },
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "min": 851,
+        "med": 5340.5,
+        "max": 15514,
+        "p(90)": 10574.800000000001,
+        "p(95)": 11194,
+        "avg": 5711.28
+      }
+    },
+    "http_req_sending": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "avg": 0.07827307692307693,
+        "min": 0,
+        "med": 0,
+        "max": 32.2515,
+        "p(90)": 0,
+        "p(95)": 0
+      }
+    },
+    "data_sent": {
+      "type": "counter",
+      "contains": "data",
+      "values": {
+        "count": 1042055,
+        "rate": 8580.599842750773
+      }
+    },
+    "checkout_conflicts": {
+      "contains": "default",
+      "values": {
+        "count": 3,
+        "rate": 0.024702918299180292
+      },
+      "type": "counter"
+    },
+    "http_req_duration{scenario:auth_flow}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "min": 0.5078,
+        "med": 418.0963,
+        "max": 5176.1471,
+        "p(90)": 1854.1227,
+        "p(95)": 2517.5304,
+        "avg": 721.517013705584
+      },
+      "thresholds": {
+        "p(95)<900": {
+          "ok": false
+        }
+      }
+    },
+    "http_req_duration{scenario:catalog_flow}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "avg": 1488.7036776998584,
+        "min": 8.3668,
+        "med": 1412.4322,
+        "max": 5189.4534,
+        "p(90)": 2934.9224400000007,
+        "p(95)": 3268.04864
+      },
+      "thresholds": {
+        "p(95)<1300": {
+          "ok": false
+        }
+      }
+    },
+    "http_req_duration{scenario:ingestion_flow}": {
+      "contains": "time",
+      "values": {
+        "avg": 697.5044661971834,
+        "min": 3.4543,
+        "med": 148.8838,
+        "max": 7230.0923,
+        "p(90)": 1847.4954200000002,
+        "p(95)": 3193.2691800000007
+      },
+      "thresholds": {
+        "p(95)<5000": {
+          "ok": true
+        }
+      },
+      "type": "trend"
+    },
+    "ingestion_flow_duration": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "med": 2242.5,
+        "max": 13152,
+        "p(90)": 10652.1,
+        "p(95)": 11838.699999999999,
+        "avg": 3541.5714285714284,
+        "min": 39
+      },
+      "thresholds": {
+        "p(95)<6500": {
+          "ok": false
+        }
+      }
+    },
+    "http_req_waiting": {
+      "values": {
+        "max": 7206.2637,
+        "p(90)": 2582.8207,
+        "p(95)": 3151.7382749999997,
+        "avg": 1094.3281370370375,
+        "min": 0,
+        "med": 791.7991
+      },
+      "type": "trend",
+      "contains": "time"
+    },
+    "iteration_duration": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "max": 15953.5511,
+        "p(90)": 6268.98753,
+        "p(95)": 8817.157135000003,
+        "avg": 3657.5842129581165,
+        "min": 118.384,
+        "med": 3235.20825
+      }
+    },
+    "http_req_duration{expected_response:true}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "avg": 1095.032111490981,
+        "min": 0.5078,
+        "med": 792.60555,
+        "max": 7230.0923,
+        "p(90)": 2582.8207,
+        "p(95)": 3152.7022500000003
+      }
+    },
+    "catalog_flow_duration": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "avg": 3153.145400593472,
+        "min": 790,
+        "med": 3039,
+        "max": 9319,
+        "p(90)": 4666.400000000001,
+        "p(95)": 5123.599999999999
+      },
+      "thresholds": {
+        "p(95)<2200": {
+          "ok": false
+        }
+      }
+    },
+    "checks": {
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "rate": 1,
+        "passes": 3315,
+        "fails": 0
+      },
+      "thresholds": {
+        "rate>0.93": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_failed": {
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "rate": 0,
+        "passes": 0,
+        "fails": 2106
+      },
+      "thresholds": {
+        "rate<0.08": {
+          "ok": true
+        }
+      }
+    },
+    "http_req_duration{scenario:circulation_flow}": {
+      "thresholds": {
+        "p(95)<1500": {
+          "ok": false
+        }
+      },
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "avg": 1276.647123042507,
+        "min": 6.8963,
+        "med": 1170.161,
+        "max": 5171.8069,
+        "p(90)": 2587.2362000000003,
+        "p(95)": 3020.394289999999
+      }
+    },
+    "http_req_connecting": {
+      "values": {
+        "p(90)": 0,
+        "p(95)": 0,
+        "avg": 0.0525172839506173,
+        "min": 0,
+        "med": 0,
+        "max": 24.0492
+      },
+      "type": "trend",
+      "contains": "time"
+    },
+    "http_req_duration": {
+      "contains": "time",
+      "values": {
+        "avg": 1095.032111490981,
+        "min": 0.5078,
+        "med": 792.60555,
+        "max": 7230.0923,
+        "p(90)": 2582.8207,
+        "p(95)": 3152.7022500000003
+      },
+      "type": "trend"
+    },
+    "http_reqs": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 2106,
+        "rate": 17.341448646024567
+      }
+    },
+    "http_req_tls_handshaking": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "avg": 0,
+        "min": 0,
+        "med": 0,
+        "max": 0,
+        "p(90)": 0,
+        "p(95)": 0
+      }
+    },
+    "http_req_receiving": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "med": 0,
+        "max": 170.7858,
+        "p(90)": 1.0061,
+        "p(95)": 1.522275,
+        "avg": 0.6257013770180442,
+        "min": 0
+      }
+    },
+    "auth_flow_duration": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "max": 6668,
+        "p(90)": 3840.7000000000003,
+        "p(95)": 4788.799999999999,
+        "avg": 1654.8643410852712,
+        "min": 6,
+        "med": 1321
+      },
+      "thresholds": {
+        "p(95)<1400": {
+          "ok": false
+        }
+      }
+    },
+    "data_received": {
+      "type": "counter",
+      "contains": "data",
+      "values": {
+        "count": 69327873,
+        "rate": 570866.9275249825
+      }
+    },
+    "vus_max": {
+      "type": "gauge",
+      "contains": "default",
+      "values": {
+        "value": 45,
+        "min": 45,
+        "max": 45
+      }
+    },
+    "vus": {
+      "type": "gauge",
+      "contains": "default",
+      "values": {
+        "value": 1,
+        "min": 0,
+        "max": 45
+      }
+    },
+    "http_req_blocked": {
+      "contains": "time",
+      "values": {
+        "p(90)": 0,
+        "p(95)": 0,
+        "avg": 0.0760738841405508,
+        "min": 0,
+        "med": 0,
+        "max": 24.0492
+      },
+      "type": "trend"
+    },
+    "iterations": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 764,
+        "rate": 6.291009860191248
+      }
+    }
+  },
+  "root_group": {
+    "id": "d41d8cd98f00b204e9800998ecf8427e",
+    "groups": [],
+    "checks": [
+        {
+          "path": "::session login status is 200",
+          "id": "3533916336f791a2f3e342b67d3ee64d",
+          "passes": 110,
+          "fails": 0,
+          "name": "session login status is 200"
+        },
+        {
+          "path": "::session login returns token cookie",
+          "id": "c34f84ae2d9253e24d5c564a91569005",
+          "passes": 110,
+          "fails": 0,
+          "name": "session login returns token cookie"
+        },
+        {
+          "name": "catalog search returns 200",
+          "path": "::catalog search returns 200",
+          "id": "d5e689b2783ba7bf1958beb0c37a4d9c",
+          "passes": 337,
+          "fails": 0
+        },
+        {
+          "name": "catalog search has data array",
+          "path": "::catalog search has data array",
+          "id": "546324340eafb5b58436ea6dbe2410d2",
+          "passes": 337,
+          "fails": 0
+        },
+        {
+          "fails": 0,
+          "name": "catalog filter returns 200",
+          "path": "::catalog filter returns 200",
+          "id": "bc7100e0a6e625a1ca6747399f6d39e8",
+          "passes": 337
+        },
+        {
+          "passes": 337,
+          "fails": 0,
+          "name": "catalog filter has pagination",
+          "path": "::catalog filter has pagination",
+          "id": "5c13bb4afe30169c5df0e6db12b76d9a"
+        },
+        {
+          "name": "auth flow session established",
+          "path": "::auth flow session established",
+          "id": "20dd2350fb8dc51529d7110a1eaeea31",
+          "passes": 258,
+          "fails": 0
+        },
+        {
+          "id": "08e1e3b37f4c12cfad4c74728e8f670d",
+          "passes": 100,
+          "fails": 0,
+          "name": "circulation list loans returns 200",
+          "path": "::circulation list loans returns 200"
+        },
+        {
+          "id": "2022bcc07098c0f89a997db4845cbcb1",
+          "passes": 258,
+          "fails": 0,
+          "name": "auth flow /auth/me is 200",
+          "path": "::auth flow /auth/me is 200"
+        },
+        {
+          "passes": 258,
+          "fails": 0,
+          "name": "auth flow /auth/logout is 200",
+          "path": "::auth flow /auth/logout is 200",
+          "id": "7ac05fc185ffd27ea6c49766f863fd40"
+        },
+        {
+          "name": "circulation available books returns 200",
+          "path": "::circulation available books returns 200",
+          "id": "b57b1bedcd0585323bf8d38091f6e511",
+          "passes": 100,
+          "fails": 0
+        },
+        {
+          "name": "circulation checkout returns 201 or 409",
+          "path": "::circulation checkout returns 201 or 409",
+          "id": "1e6f1c51ef367f5502109f88039db5a2",
+          "passes": 100,
+          "fails": 0
+        },
+        {
+          "passes": 97,
+          "fails": 0,
+          "name": "circulation checkout returns loan id",
+          "path": "::circulation checkout returns loan id",
+          "id": "4b9721b48fdc81fbf6a8a431b1dbb8f6"
+        },
+        {
+          "id": "84a38cc7348f01ff2f05bff8646d2850",
+          "passes": 97,
+          "fails": 0,
+          "name": "circulation checkin returns 200",
+          "path": "::circulation checkin returns 200"
+        },
+        {
+          "name": "catalog detail returns 200",
+          "path": "::catalog detail returns 200",
+          "id": "6a07a0806ee9e251eceb3fd5e4a1c457",
+          "passes": 19,
+          "fails": 0
+        },
+        {
+          "name": "ingestion list jobs returns 200",
+          "path": "::ingestion list jobs returns 200",
+          "id": "d67c859964166ea72e82941cf9f6a29c",
+          "passes": 70,
+          "fails": 0
+        },
+        {
+          "passes": 70,
+          "fails": 0,
+          "name": "ingestion isbn lookup returns 200",
+          "path": "::ingestion isbn lookup returns 200",
+          "id": "d466a08bca104d46c220d1f99fb62f9c"
+        },
+        {
+          "name": "ingestion analyze returns 200",
+          "path": "::ingestion analyze returns 200",
+          "id": "d1cef61819576121583872f128d43223",
+          "passes": 70,
+          "fails": 0
+        },
+        {
+          "path": "::ingestion analyze returns job id",
+          "id": "1c36a5c89a1d050b7035f6fd8b1fc915",
+          "passes": 70,
+          "fails": 0,
+          "name": "ingestion analyze returns job id"
+        },
+        {
+          "name": "ingestion get job returns 200",
+          "path": "::ingestion get job returns 200",
+          "id": "b6d1dce05c70f7a818c9c4040d30e7a3",
+          "passes": 70,
+          "fails": 0
+        },
+        {
+          "fails": 0,
+          "name": "ingestion reject returns 200",
+          "path": "::ingestion reject returns 200",
+          "id": "a5ff6cef12a455ded45a4f251539e977",
+          "passes": 70
+        },
+        {
+          "passes": 40,
+          "fails": 0,
+          "name": "circulation pre-checkin returns 200 or 409",
+          "path": "::circulation pre-checkin returns 200 or 409",
+          "id": "fc6e9266e28999a56f01240d3d4e6bca"
+        }
+      ],
+    "name": "",
+    "path": ""
+  },
+  "options": {
+    "summaryTrendStats": [
+      "avg",
+      "min",
+      "med",
+      "max",
+      "p(90)",
+      "p(95)"
+    ],
+    "summaryTimeUnit": "",
+    "noColor": false
+  },
+  "state": {
+    "isStdErrTTY": false,
+    "testRunDurationMs": 121443.1414,
+    "isStdOutTTY": false
+  }
+}

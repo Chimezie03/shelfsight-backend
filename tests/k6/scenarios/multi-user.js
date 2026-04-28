@@ -73,6 +73,50 @@ const profiles = {
       { duration: "30s", target: 0 },
     ],
   },
+  task4_90: {
+    auth: [
+      { duration: "30s", target: 8 },
+      { duration: "1m", target: 20 },
+      { duration: "30s", target: 0 },
+    ],
+    catalog: [
+      { duration: "30s", target: 16 },
+      { duration: "1m", target: 40 },
+      { duration: "30s", target: 0 },
+    ],
+    circulation: [
+      { duration: "30s", target: 8 },
+      { duration: "1m", target: 20 },
+      { duration: "30s", target: 0 },
+    ],
+    ingestion: [
+      { duration: "30s", target: 4 },
+      { duration: "1m", target: 10 },
+      { duration: "30s", target: 0 },
+    ],
+  },
+  task4_135: {
+    auth: [
+      { duration: "30s", target: 12 },
+      { duration: "1m", target: 30 },
+      { duration: "30s", target: 0 },
+    ],
+    catalog: [
+      { duration: "30s", target: 24 },
+      { duration: "1m", target: 60 },
+      { duration: "30s", target: 0 },
+    ],
+    circulation: [
+      { duration: "30s", target: 12 },
+      { duration: "1m", target: 30 },
+      { duration: "30s", target: 0 },
+    ],
+    ingestion: [
+      { duration: "30s", target: 6 },
+      { duration: "1m", target: 15 },
+      { duration: "30s", target: 0 },
+    ],
+  },
 };
 
 const selectedProfile = profiles[PROFILE] || profiles.task3;
