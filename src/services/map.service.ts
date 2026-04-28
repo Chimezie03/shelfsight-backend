@@ -283,6 +283,7 @@ export async function getBookCopiesByShelf(organizationId: string, shelfId: stri
     barcode: copy.barcode,
     status: copy.status,
     shelfId: copy.shelfId,
+    shelfTier: copy.shelfTier,
     book: {
       id: copy.book.id,
       title: copy.book.title,

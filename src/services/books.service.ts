@@ -74,6 +74,13 @@ const bookPayload = (data: any) => ({
   pageCount: data.pageCount != null ? parseInt(data.pageCount, 10) || null : undefined,
 });
 
+function parseShelfTier(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  const n = parseInt(String(value), 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 /** Matches list-item shape expected by frontend `BackendBook` / catalog transforms. */
 export function mapBookWithCopies(book: Book & { copies: CopyWithShelf[] }) {
   const shelfCopy = book.copies.find((c) => c.shelf);
@@ -92,6 +99,7 @@ export function mapBookWithCopies(book: Book & { copies: CopyWithShelf[] }) {
     language: book.language,
     coverImageUrl: book.coverImageUrl,
     publishYear: book.publishYear,
+    pageCount: book.pageCount,
     availableCopies,
     processingCopies,
     totalCopies: book.copies.length,
@@ -99,6 +107,7 @@ export function mapBookWithCopies(book: Book & { copies: CopyWithShelf[] }) {
     createdAt: book.createdAt,
     shelfId: shelf?.id ?? null,
     shelfLabel: shelf?.label ?? null,
+    shelfTier: shelfCopy?.shelfTier ?? null,
   };
 }
 
@@ -266,6 +275,9 @@ export async function createBookService(organizationId: string, data: any) {
   const copiesCount = Math.max(0, parseInt(data.copies) || 0);
   const copyStatus = mapCopyStatus(data.status);
   const cleanIsbn = String(data.isbn).replace(/-/g, '');
+  const shelfId = typeof data.shelfId === 'string' && data.shelfId ? data.shelfId : null;
+  const tierValue = parseShelfTier(data.shelfTier);
+  const shelfTier = tierValue === undefined ? null : tierValue;
 
   const book = await db.book.create({
     data: {
@@ -277,6 +289,8 @@ export async function createBookService(organizationId: string, data: any) {
                 barcode: `${cleanIsbn}-${i + 1}`,
                 status: copyStatus,
                 organizationId,
+                shelfId,
+                shelfTier,
               })),
             }
           : undefined,
@@ -539,10 +553,18 @@ export async function updateBookService(organizationId: string, id: string, data
       }
     }
 
-    if (data.shelfId) {
+    const tierUpdate = parseShelfTier(data.shelfTier);
+    if (data.shelfId !== undefined || tierUpdate !== undefined) {
+      const updateData: { shelfId?: string | null; shelfTier?: number | null } = {};
+      if (data.shelfId !== undefined) {
+        updateData.shelfId = data.shelfId || null;
+      }
+      if (tierUpdate !== undefined) {
+        updateData.shelfTier = tierUpdate;
+      }
       await tx.bookCopy.updateMany({
         where: { bookId: id, status: 'AVAILABLE' },
-        data: { shelfId: data.shelfId },
+        data: updateData,
       });
     }
 
@@ -574,6 +596,26 @@ export async function deleteBookService(organizationId: string, id: string) {
     }
 
     return tx.book.delete({ where: { id } });
+  });
+}
+
+export async function deleteAllBooksService(organizationId: string) {
+  const db = forOrg(organizationId);
+  return await db.$transaction(async (tx) => {
+    const copies = await tx.bookCopy.findMany({ select: { id: true } });
+    const copyIds = copies.map((c) => c.id);
+
+    if (copyIds.length > 0) {
+      await (tx as any).bookCopyEvent.deleteMany({
+        where: { bookCopyId: { in: copyIds } },
+      });
+      await tx.fine.deleteMany({ where: { loan: { bookCopyId: { in: copyIds } } } });
+      await tx.loan.deleteMany({ where: { bookCopyId: { in: copyIds } } });
+      await tx.bookCopy.deleteMany({});
+    }
+
+    const result = await tx.book.deleteMany({});
+    return { booksDeleted: result.count, copiesDeleted: copyIds.length };
   });
 }
 
@@ -637,7 +679,7 @@ export async function fetchBooks(organizationId: string, params: FetchBooksParam
     normalizedSortField === 'status';
 
   if (!requiresInMemoryPass) {
-    const [total, books] = await Promise.all([
+    const [total, books, copyStatusGroups] = await Promise.all([
       db.book.count({ where }),
       db.book.findMany({
         where,
@@ -646,7 +688,19 @@ export async function fetchBooks(organizationId: string, params: FetchBooksParam
         orderBy: buildDbOrderBy(normalizedSortField, normalizedSortDirection),
         include: { copies: { include: { shelf: true } } },
       }),
+      db.bookCopy.groupBy({
+        by: ['status'],
+        where: { book: where },
+        _count: { _all: true },
+      }),
     ]);
+
+    const stats = { available: 0, checkedOut: 0, totalCopies: 0 };
+    for (const group of copyStatusGroups) {
+      stats.totalCopies += group._count._all;
+      if (group.status === 'AVAILABLE') stats.available = group._count._all;
+      else if (group.status === 'CHECKED_OUT') stats.checkedOut = group._count._all;
+    }
 
     return {
       data: books.map(mapBookWithCopies),
@@ -656,6 +710,7 @@ export async function fetchBooks(organizationId: string, params: FetchBooksParam
         total,
         totalPages: total === 0 ? 0 : Math.ceil(total / safeLimit),
       },
+      stats,
     };
   }
 
@@ -707,6 +762,17 @@ export async function fetchBooks(organizationId: string, params: FetchBooksParam
   const start = (safePage - 1) * safeLimit;
   const paginated = filtered.slice(start, start + safeLimit);
 
+  const stats = filtered.reduce(
+    (acc, b) => ({
+      available: acc.available + b.availableCopies,
+      checkedOut:
+        acc.checkedOut +
+        Math.max(0, b.totalCopies - b.availableCopies - b.processingCopies),
+      totalCopies: acc.totalCopies + b.totalCopies,
+    }),
+    { available: 0, checkedOut: 0, totalCopies: 0 },
+  );
+
   return {
     data: paginated,
     pagination: {
@@ -715,6 +781,7 @@ export async function fetchBooks(organizationId: string, params: FetchBooksParam
       total,
       totalPages: total === 0 ? 0 : Math.ceil(total / safeLimit),
     },
+    stats,
   };
 }
 

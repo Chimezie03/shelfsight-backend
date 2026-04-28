@@ -9,6 +9,7 @@ import {
   bulkUploadFile,
   updateBook,
   deleteBook,
+  deleteAllBooks,
 } from '../controllers/books.controller';
 
 import { requireAuth, requireRole } from '../middleware/auth.middleware';
@@ -22,6 +23,7 @@ router.post('/bulk', requireAuth, requireRole('ADMIN', 'STAFF'), wrapAsync(bulkC
 router.post('/bulk-file', requireAuth, requireRole('ADMIN', 'STAFF'), upload.single('file'), wrapAsync(bulkUploadFile));
 router.post('/', requireAuth, requireRole('ADMIN', 'STAFF'), wrapAsync(createBook));
 router.put('/:id', requireAuth, requireRole('ADMIN', 'STAFF'), wrapAsync(updateBook));
+router.delete('/all', requireAuth, requireRole('ADMIN'), wrapAsync(deleteAllBooks));
 router.delete('/:id', requireAuth, requireRole('ADMIN', 'STAFF'), wrapAsync(deleteBook));
 
 export default router;

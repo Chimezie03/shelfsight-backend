@@ -7,6 +7,7 @@ import {
   bulkCreateBooksService,
   updateBookService,
   deleteBookService,
+  deleteAllBooksService,
 } from '../services/books.service';
 import { AppError } from '../lib/errors';
 
@@ -120,4 +121,17 @@ export async function deleteBook(req: Request, res: Response) {
   const orgId = requireOrg(req);
   await deleteBookService(orgId, req.params.id);
   res.status(204).send();
+}
+
+export async function deleteAllBooks(req: Request, res: Response) {
+  const orgId = requireOrg(req);
+  if (req.body?.confirm !== 'DELETE ALL BOOKS') {
+    throw new AppError(
+      400,
+      'CONFIRMATION_REQUIRED',
+      'Type "DELETE ALL BOOKS" in the confirm field to proceed',
+    );
+  }
+  const result = await deleteAllBooksService(orgId);
+  res.status(200).json(result);
 }

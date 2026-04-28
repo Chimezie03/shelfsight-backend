@@ -97,6 +97,7 @@ model BookCopy {
   status         CopyStatus      @default(AVAILABLE)
   shelf          ShelfSection?   @relation(fields: [shelfId], references: [id])
   shelfId        String?
+  shelfTier      Int?
   organization   Organization    @relation(fields: [organizationId], references: [id])
   organizationId String
   loans          Loan[]
