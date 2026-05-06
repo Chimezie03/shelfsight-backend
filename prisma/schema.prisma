@@ -8,15 +8,53 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String
-  name         String
-  role         Role
-  createdAt    DateTime @default(now())
-  loans        Loan[]
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
 
+  users         User[]
+  books         Book[]
+  bookCopies    BookCopy[]
+  loans         Loan[]
+  fines         Fine[]
+  transactions  TransactionLog[]
+  shelves       ShelfSection[]
+  ingestionJobs IngestionJob[]
+  invites       Invite[]
+}
+
+model Invite {
+  id             String       @id @default(uuid())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationId String
+  email          String?
+  role           Role
+  tokenHash      String       @unique
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  acceptedUserId String?
+  createdById    String
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([expiresAt])
+}
+
+model User {
+  id             String       @id @default(uuid())
+  email          String
+  passwordHash   String
+  name           String
+  role           Role
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  loans          Loan[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
 }
 
@@ -27,19 +65,23 @@ enum Role {
 }
 
 model Book {
-  id            String      @id @default(uuid())
-  title         String
-  author        String
-  isbn          String      @unique
-  genre         String?
-  deweyDecimal  String?
-  language      String      @default("English")
-  coverImageUrl String?
-  publishYear   String?
-  pageCount     Int?
-  createdAt     DateTime    @default(now())
-  copies        BookCopy[]
+  id             String       @id @default(uuid())
+  title          String
+  author         String
+  isbn           String
+  genre          String?
+  deweyDecimal   String?
+  language       String       @default("English")
+  coverImageUrl  String?
+  publishYear    String?
+  pageCount      Int?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  copies         BookCopy[]
 
+  @@unique([organizationId, isbn])
+  @@index([organizationId])
   @@index([createdAt])
   @@index([language])
   @@index([title(ops: raw("gin_trgm_ops"))], type: Gin)
@@ -48,16 +90,21 @@ model Book {
 }
 
 model BookCopy {
-  id        String          @id @default(uuid())
-  book      Book            @relation(fields: [bookId], references: [id])
-  bookId    String
-  barcode   String          @unique
-  status    CopyStatus      @default(AVAILABLE)
-  shelf     ShelfSection?   @relation(fields: [shelfId], references: [id])
-  shelfId   String?
-  loans     Loan[]
-  events    BookCopyEvent[]
+  id             String          @id @default(uuid())
+  book           Book            @relation(fields: [bookId], references: [id])
+  bookId         String
+  barcode        String
+  status         CopyStatus      @default(AVAILABLE)
+  shelf          ShelfSection?   @relation(fields: [shelfId], references: [id])
+  shelfId        String?
+  shelfTier      Int?
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  organizationId String
+  loans          Loan[]
+  events         BookCopyEvent[]
 
+  @@unique([organizationId, barcode])
+  @@index([organizationId])
   @@index([bookId])
   @@index([shelfId])
 }
@@ -93,34 +140,40 @@ enum CopyEventType {
 }
 
 model Loan {
-  id           String     @id @default(uuid())
-  user         User       @relation(fields: [userId], references: [id])
-  userId       String
-  bookCopy     BookCopy   @relation(fields: [bookCopyId], references: [id])
-  bookCopyId   String
-  checkedOutAt DateTime   @default(now())
-  dueDate      DateTime
-  returnedAt   DateTime?
-  fineAmount   Float      @default(0)
-  fines        Fine[]
+  id             String       @id @default(uuid())
+  user           User         @relation(fields: [userId], references: [id])
+  userId         String
+  bookCopy       BookCopy     @relation(fields: [bookCopyId], references: [id])
+  bookCopyId     String
+  checkedOutAt   DateTime     @default(now())
+  dueDate        DateTime
+  returnedAt     DateTime?
+  fineAmount     Float        @default(0)
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
+  fines          Fine[]
 
+  @@index([organizationId])
   @@index([userId, checkedOutAt])
   @@index([bookCopyId, returnedAt])
   @@index([returnedAt, dueDate])
 }
 
 model Fine {
-  id        String     @id @default(uuid())
-  loan      Loan       @relation(fields: [loanId], references: [id])
-  loanId    String
-  userId    String
-  amount    Float
-  status    FineStatus @default(UNPAID)
-  reason    String     @default("Overdue")
-  paidAt    DateTime?
-  waivedBy  String?
-  createdAt DateTime   @default(now())
+  id             String       @id @default(uuid())
+  loan           Loan         @relation(fields: [loanId], references: [id])
+  loanId         String
+  userId         String
+  amount         Float
+  status         FineStatus   @default(UNPAID)
+  reason         String       @default("Overdue")
+  paidAt         DateTime?
+  waivedBy       String?
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  organizationId String
 
+  @@index([organizationId])
   @@index([userId, status])
   @@index([loanId])
   @@index([createdAt])
@@ -133,16 +186,19 @@ enum FineStatus {
 }
 
 model TransactionLog {
-  id           String          @id @default(uuid())
-  type         TransactionType
-  loanId       String?
-  bookTitle    String
-  memberName   String
-  memberNumber String
-  processedBy  String
-  details      String
-  createdAt    DateTime        @default(now())
+  id             String          @id @default(uuid())
+  type           TransactionType
+  loanId         String?
+  bookTitle      String
+  memberName     String
+  memberNumber   String
+  processedBy    String
+  details        String
+  createdAt      DateTime        @default(now())
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  organizationId String
 
+  @@index([organizationId])
   @@index([type, createdAt])
   @@index([createdAt])
   @@index([bookTitle(ops: raw("gin_trgm_ops"))], type: Gin)
@@ -158,7 +214,7 @@ enum TransactionType {
 }
 
 model ShelfSection {
-  id              String     @id @default(uuid())
+  id              String       @id @default(uuid())
   label           String
   mapX            Int
   mapY            Int
@@ -166,17 +222,20 @@ model ShelfSection {
   height          Int
   floor           Int
   sectionCode     String?
-  category        String?    @default("Uncategorized")
+  category        String?      @default("Uncategorized")
   deweyRangeStart String?
   deweyRangeEnd   String?
-  numberOfTiers   Int?       @default(4)
-  capacityPerTier Int?       @default(30)
-  color           String?    @default("#1B2A4A")
-  rotation        Int?       @default(0)
+  numberOfTiers   Int?         @default(4)
+  capacityPerTier Int?         @default(30)
+  color           String?      @default("#1B2A4A")
+  rotation        Int?         @default(0)
   notes           String?
-  shelfType       String?    @default("single-shelf")
+  shelfType       String?      @default("single-shelf")
+  organization    Organization @relation(fields: [organizationId], references: [id])
+  organizationId  String
   copies          BookCopy[]
 
+  @@index([organizationId])
   @@index([floor])
 }
 
@@ -201,7 +260,10 @@ model IngestionJob {
   reviewedAt           DateTime?
   createdBookId        String?
   createdAt            DateTime        @default(now())
+  organization         Organization    @relation(fields: [organizationId], references: [id])
+  organizationId       String
 
+  @@index([organizationId])
   @@index([createdAt])
   @@index([status, createdAt])
 }

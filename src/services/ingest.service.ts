@@ -5,7 +5,7 @@ import {
   DetectDocumentTextCommand,
 } from '@aws-sdk/client-textract';
 import OpenAI from 'openai';
-import prisma from '../lib/prisma';
+import { forOrg } from '../lib/prisma';
 import { AppError } from '../lib/errors';
 import type { IngestionStatus } from '@prisma/client';
 const fetch = require('node-fetch');
@@ -549,32 +549,61 @@ export async function extractMetadataFromOcr(
 // 6. IngestionJob management
 // ---------------------------------------------------------------------------
 
-export async function listIngestionJobs(filters: {
-  status?: IngestionStatus;
-  page?: number;
-  limit?: number;
-}) {
+export async function createIngestionJob(
+  organizationId: string,
+  data: {
+    imageUrl: string;
+    status: IngestionStatus;
+    ocrText: string | null;
+    detectedIsbn: string | null;
+    suggestedDewey: string | null;
+    confidenceScore: number;
+    suggestedTitle: string | null;
+    suggestedAuthor: string | null;
+    suggestedPublisher: string | null;
+    suggestedPublishDate: string | null;
+    suggestedGenre: string | null;
+    coverImageUrl: string | null;
+    metadataSource: string | null;
+    deweyReasoning: string | null;
+    language: string | null;
+  },
+) {
+  const db = forOrg(organizationId);
+  return db.ingestionJob.create({ data: data as any });
+}
+
+export async function listIngestionJobs(
+  organizationId: string,
+  filters: {
+    status?: IngestionStatus;
+    page?: number;
+    limit?: number;
+  },
+) {
   const page = filters.page ?? 1;
   const limit = filters.limit ?? 20;
   const skip = (page - 1) * limit;
+  const db = forOrg(organizationId);
 
   const where = filters.status ? { status: filters.status } : {};
 
   const [jobs, total] = await Promise.all([
-    prisma.ingestionJob.findMany({
+    db.ingestionJob.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       skip,
       take: limit,
     }),
-    prisma.ingestionJob.count({ where }),
+    db.ingestionJob.count({ where }),
   ]);
 
   return { jobs, total, page, limit };
 }
 
-export async function getIngestionJobById(id: string) {
-  const job = await prisma.ingestionJob.findUnique({ where: { id } });
+export async function getIngestionJobById(organizationId: string, id: string) {
+  const db = forOrg(organizationId);
+  const job = await db.ingestionJob.findFirst({ where: { id } });
   if (!job) {
     throw new AppError(404, 'NOT_FOUND', `Ingestion job ${id} not found.`);
   }
@@ -582,6 +611,7 @@ export async function getIngestionJobById(id: string) {
 }
 
 export async function approveIngestionJob(
+  organizationId: string,
   id: string,
   overrides: {
     title: string;
@@ -595,7 +625,8 @@ export async function approveIngestionJob(
   },
   reviewedBy: string,
 ) {
-  const job = await prisma.ingestionJob.findUnique({ where: { id } });
+  const db = forOrg(organizationId);
+  const job = await db.ingestionJob.findFirst({ where: { id } });
   if (!job) {
     throw new AppError(404, 'NOT_FOUND', `Ingestion job ${id} not found.`);
   }
@@ -607,7 +638,7 @@ export async function approveIngestionJob(
     );
   }
 
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     const book = await tx.book.create({
       data: {
         title: overrides.title,
@@ -618,7 +649,7 @@ export async function approveIngestionJob(
         language: overrides.language || job.language || 'English',
         coverImageUrl: overrides.coverImageUrl || null,
         publishYear: overrides.publishYear || null,
-      },
+      } as any,
     });
 
     const barcode = `BC-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -627,7 +658,7 @@ export async function approveIngestionJob(
         bookId: book.id,
         barcode,
         status: 'PROCESSING',
-      },
+      } as any,
     });
 
     const updatedJob = await tx.ingestionJob.update({
@@ -646,8 +677,9 @@ export async function approveIngestionJob(
   return result;
 }
 
-export async function rejectIngestionJob(id: string, reviewedBy: string) {
-  const job = await prisma.ingestionJob.findUnique({ where: { id } });
+export async function rejectIngestionJob(organizationId: string, id: string, reviewedBy: string) {
+  const db = forOrg(organizationId);
+  const job = await db.ingestionJob.findFirst({ where: { id } });
   if (!job) {
     throw new AppError(404, 'NOT_FOUND', `Ingestion job ${id} not found.`);
   }
@@ -659,7 +691,7 @@ export async function rejectIngestionJob(id: string, reviewedBy: string) {
     );
   }
 
-  return prisma.ingestionJob.update({
+  return db.ingestionJob.update({
     where: { id },
     data: {
       status: 'REJECTED',

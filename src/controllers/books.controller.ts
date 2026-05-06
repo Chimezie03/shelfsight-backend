@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import ExcelJS from 'exceljs';
 import {
   fetchBooks,
   fetchBookById,
@@ -6,9 +7,19 @@ import {
   bulkCreateBooksService,
   updateBookService,
   deleteBookService,
+  deleteAllBooksService,
 } from '../services/books.service';
+import { AppError } from '../lib/errors';
+
+function requireOrg(req: Request): string {
+  if (!req.user) {
+    throw new AppError(401, 'UNAUTHORIZED', 'Not authenticated');
+  }
+  return req.user.organizationId;
+}
 
 export async function getBooks(req: Request, res: Response) {
+  const orgId = requireOrg(req);
   const {
     search,
     title,
@@ -35,7 +46,7 @@ export async function getBooks(req: Request, res: Response) {
   const parsedYearMax =
     typeof yearMax === 'string' && yearMax.trim() !== '' ? Number(yearMax) : undefined;
 
-  const books = await fetchBooks({
+  const books = await fetchBooks(orgId, {
     search: typeof search === 'string' ? search : undefined,
     title: typeof title === 'string' ? title : undefined,
     author: typeof author === 'string' ? author : undefined,
@@ -55,20 +66,19 @@ export async function getBooks(req: Request, res: Response) {
 }
 
 export async function getBook(req: Request, res: Response) {
-  const book = await fetchBookById(req.params.id);
+  const orgId = requireOrg(req);
+  const book = await fetchBookById(orgId, req.params.id);
   res.json(book);
 }
 
-import ExcelJS from 'exceljs';
-
 export async function createBook(req: Request, res: Response) {
-  const book = await createBookService(req.body);
+  const orgId = requireOrg(req);
+  const book = await createBookService(orgId, req.body);
   res.status(201).json(book);
 }
 
-import { AppError } from '../lib/errors';
-
 export async function bulkUploadFile(req: Request, res: Response) {
+  const orgId = requireOrg(req);
   if (!req.file) {
     throw new AppError(400, 'VALIDATION_ERROR', 'No file uploaded');
   }
@@ -112,21 +122,37 @@ export async function bulkUploadFile(req: Request, res: Response) {
     status: row.status || row.Status,
   }));
 
-  const result = await bulkCreateBooksService(items);
+  const result = await bulkCreateBooksService(orgId, items);
   res.status(200).json(result);
 }
 
 export async function bulkCreateBooks(req: Request, res: Response) {
-  const result = await bulkCreateBooksService(req.body);
+  const orgId = requireOrg(req);
+  const result = await bulkCreateBooksService(orgId, req.body);
   res.status(201).json(result);
 }
 
 export async function updateBook(req: Request, res: Response) {
-  const book = await updateBookService(req.params.id, req.body);
+  const orgId = requireOrg(req);
+  const book = await updateBookService(orgId, req.params.id, req.body);
   res.json(book);
 }
 
 export async function deleteBook(req: Request, res: Response) {
-  await deleteBookService(req.params.id);
+  const orgId = requireOrg(req);
+  await deleteBookService(orgId, req.params.id);
   res.status(204).send();
+}
+
+export async function deleteAllBooks(req: Request, res: Response) {
+  const orgId = requireOrg(req);
+  if (req.body?.confirm !== 'DELETE ALL BOOKS') {
+    throw new AppError(
+      400,
+      'CONFIRMATION_REQUIRED',
+      'Type "DELETE ALL BOOKS" in the confirm field to proceed',
+    );
+  }
+  const result = await deleteAllBooksService(orgId);
+  res.status(200).json(result);
 }

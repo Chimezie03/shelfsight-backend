@@ -1,10 +1,19 @@
 import type { Request, Response } from 'express';
 import { fetchTransactions } from '../services/transactions.service';
 import type { TransactionType } from '@prisma/client';
+import { AppError } from '../lib/errors';
 
 const VALID_TYPES = new Set(['CHECKOUT', 'CHECKIN', 'RENEWAL', 'FINE_PAID', 'FINE_WAIVED']);
 
+function requireOrg(req: Request): string {
+  if (!req.user) {
+    throw new AppError(401, 'UNAUTHORIZED', 'Not authenticated');
+  }
+  return req.user.organizationId;
+}
+
 export async function getTransactions(req: Request, res: Response) {
+  const orgId = requireOrg(req);
   const { type, search, dateFrom, dateTo, page = 1, limit = 20 } = req.query;
 
   const MAX_LIMIT = 100;
@@ -14,7 +23,7 @@ export async function getTransactions(req: Request, res: Response) {
   const parsedType =
     typeof type === 'string' && VALID_TYPES.has(type) ? (type as TransactionType) : undefined;
 
-  const result = await fetchTransactions({
+  const result = await fetchTransactions(orgId, {
     type: parsedType,
     search: typeof search === 'string' ? search : undefined,
     dateFrom: typeof dateFrom === 'string' ? dateFrom : undefined,

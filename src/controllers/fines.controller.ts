@@ -6,7 +6,15 @@ import { AppError } from '../lib/errors';
 
 const VALID_FINE_STATUSES = new Set(['UNPAID', 'PAID', 'WAIVED']);
 
+function requireOrg(req: Request): string {
+  if (!req.user) {
+    throw new AppError(401, 'UNAUTHORIZED', 'Not authenticated');
+  }
+  return req.user.organizationId;
+}
+
 export async function getFines(req: Request, res: Response) {
+  const orgId = requireOrg(req);
   const { userId, status, search, page = 1, limit = 50 } = req.query;
 
   const MAX_LIMIT = 100;
@@ -25,7 +33,7 @@ export async function getFines(req: Request, res: Response) {
     ? (typeof userId === 'string' ? userId : undefined)
     : req.user!.userId;
 
-  const result = await fetchFines({
+  const result = await fetchFines(orgId, {
     userId: effectiveUserId,
     status: safeStatus,
     search: typeof search === 'string' ? search : undefined,
@@ -37,6 +45,7 @@ export async function getFines(req: Request, res: Response) {
 }
 
 export async function markFinePaid(req: Request, res: Response) {
+  const orgId = requireOrg(req);
   const { fineId } = req.params;
   if (!fineId) {
     throw new AppError(400, 'VALIDATION_ERROR', 'Missing required param: fineId', {
@@ -47,16 +56,19 @@ export async function markFinePaid(req: Request, res: Response) {
   // PATRONs may only pay their own fines
   const isPrivileged = req.user?.role === 'ADMIN' || req.user?.role === 'STAFF';
   if (!isPrivileged) {
-    const fine = await prisma.fine.findUnique({ where: { id: fineId }, select: { userId: true } });
-    if (!fine) throw new AppError(404, 'NOT_FOUND', 'Fine not found');
-    if (fine.userId !== req.user!.userId) {
+    const existing = await prisma.fine.findFirst({
+      where: { id: fineId, organizationId: orgId },
+      select: { userId: true },
+    });
+    if (!existing) throw new AppError(404, 'NOT_FOUND', 'Fine not found');
+    if (existing.userId !== req.user!.userId) {
       throw new AppError(403, 'FORBIDDEN', 'Insufficient permissions');
     }
   }
 
-  const fine = await payFine(fineId);
+  const fine = await payFine(orgId, fineId);
 
-  await createTransaction({
+  await createTransaction(orgId, {
     type: 'FINE_PAID',
     loanId: fine.loanId,
     bookTitle: fine.bookTitle,
@@ -70,6 +82,7 @@ export async function markFinePaid(req: Request, res: Response) {
 }
 
 export async function markFineWaived(req: Request, res: Response) {
+  const orgId = requireOrg(req);
   const { fineId } = req.params;
   if (!fineId) {
     throw new AppError(400, 'VALIDATION_ERROR', 'Missing required param: fineId', {
@@ -78,9 +91,9 @@ export async function markFineWaived(req: Request, res: Response) {
   }
 
   const staffName = req.user?.name ?? 'Staff';
-  const fine = await waiveFine(fineId, staffName);
+  const fine = await waiveFine(orgId, fineId, staffName);
 
-  await createTransaction({
+  await createTransaction(orgId, {
     type: 'FINE_WAIVED',
     loanId: fine.loanId,
     bookTitle: fine.bookTitle,

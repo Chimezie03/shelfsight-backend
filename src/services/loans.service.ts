@@ -1,4 +1,4 @@
-import prisma from '../lib/prisma';
+import prisma, { forOrg } from '../lib/prisma';
 import { AppError } from '../lib/errors';
 import { createTransaction } from './transactions.service';
 
@@ -42,8 +42,15 @@ function mapLoanResponse(loan: any) {
   };
 }
 
-export async function checkoutService(userId: string, bookCopyId: string, dueDays?: number) {
-  const copy = await prisma.bookCopy.findUnique({ where: { id: bookCopyId } });
+export async function checkoutService(
+  organizationId: string,
+  userId: string,
+  bookCopyId: string,
+  dueDays?: number,
+) {
+  const db = forOrg(organizationId);
+
+  const copy = await db.bookCopy.findFirst({ where: { id: bookCopyId } });
   if (!copy) throw new AppError(404, 'NOT_FOUND', 'Book copy not found');
   if (copy.status !== 'AVAILABLE') {
     throw new AppError(409, 'RESOURCE_UNAVAILABLE', 'Book copy is not available for checkout');
@@ -52,9 +59,9 @@ export async function checkoutService(userId: string, bookCopyId: string, dueDay
   const dueDate = new Date();
   dueDate.setDate(dueDate.getDate() + (dueDays ?? DEFAULT_LOAN_DAYS));
 
-  const [loan] = await prisma.$transaction([
-    prisma.loan.create({
-      data: { userId, bookCopyId, dueDate },
+  const [loan] = await db.$transaction([
+    db.loan.create({
+      data: { userId, bookCopyId, dueDate } as any,
       include: {
         user: { select: { id: true, name: true, email: true } },
         bookCopy: {
@@ -64,16 +71,17 @@ export async function checkoutService(userId: string, bookCopyId: string, dueDay
         },
       },
     }),
-    prisma.bookCopy.update({
+    db.bookCopy.update({
       where: { id: bookCopyId },
       data: { status: 'CHECKED_OUT', shelfId: null },
     }),
+    // BookCopyEvent is unscoped (audit log keyed off bookCopy.organizationId).
     prisma.bookCopyEvent.create({
       data: { bookCopyId, type: 'CHECKED_OUT', userId },
     }),
   ]);
 
-  await createTransaction({
+  await createTransaction(organizationId, {
     type: 'CHECKOUT',
     loanId: loan.id,
     bookTitle: loan.bookCopy.book.title,
@@ -86,8 +94,9 @@ export async function checkoutService(userId: string, bookCopyId: string, dueDay
   return mapLoanResponse(loan);
 }
 
-export async function checkinService(loanId: string) {
-  const loan = await prisma.loan.findUnique({ where: { id: loanId } });
+export async function checkinService(organizationId: string, loanId: string) {
+  const db = forOrg(organizationId);
+  const loan = await db.loan.findFirst({ where: { id: loanId } });
   if (!loan) throw new AppError(404, 'NOT_FOUND', 'Loan not found');
   if (loan.returnedAt) throw new AppError(409, 'ALREADY_RETURNED', 'Loan already returned');
 
@@ -102,7 +111,7 @@ export async function checkinService(loanId: string) {
   }
 
   const txOps: any[] = [
-    prisma.loan.update({
+    db.loan.update({
       where: { id: loanId },
       data: { returnedAt: now, fineAmount },
       include: {
@@ -114,7 +123,7 @@ export async function checkinService(loanId: string) {
         },
       },
     }),
-    prisma.bookCopy.update({
+    db.bookCopy.update({
       where: { id: loan.bookCopyId },
       data: { status: 'AVAILABLE' },
     }),
@@ -123,29 +132,27 @@ export async function checkinService(loanId: string) {
     }),
   ];
 
-  // Create a Fine record if overdue
   if (fineAmount > 0) {
     txOps.push(
-      prisma.fine.create({
+      db.fine.create({
         data: {
           loanId,
           userId: loan.userId,
           amount: fineAmount,
           reason: 'Overdue',
-        },
+        } as any,
       }),
     );
   }
 
-  const results = await prisma.$transaction(txOps);
+  const results = await db.$transaction(txOps);
   const updated = results[0];
 
-  // Create transaction log entry for check-in
   const overdueDays = fineAmount > 0
     ? Math.ceil((now.getTime() - loan.dueDate.getTime()) / (1000 * 60 * 60 * 24))
     : 0;
 
-  await createTransaction({
+  await createTransaction(organizationId, {
     type: 'CHECKIN',
     loanId,
     bookTitle: updated.bookCopy.book.title,
@@ -160,8 +167,9 @@ export async function checkinService(loanId: string) {
   return mapLoanResponse(updated);
 }
 
-export async function getBookCopyLocation(bookCopyId: string) {
-  const copy = await prisma.bookCopy.findUnique({
+export async function getBookCopyLocation(organizationId: string, bookCopyId: string) {
+  const db = forOrg(organizationId);
+  const copy = await db.bookCopy.findFirst({
     where: { id: bookCopyId },
     include: {
       book: { select: { id: true, title: true, author: true } },
@@ -173,7 +181,7 @@ export async function getBookCopyLocation(bookCopyId: string) {
       },
     },
   });
-  if (!copy) throw Object.assign(new Error('Book copy not found'), { code: 'NOT_FOUND' });
+  if (!copy) throw new AppError(404, 'NOT_FOUND', 'Book copy not found');
 
   return {
     id: copy.id,
@@ -185,20 +193,26 @@ export async function getBookCopyLocation(bookCopyId: string) {
   };
 }
 
-export async function shelveBookCopy(bookCopyId: string, shelfId: string, userId: string) {
-  const copy = await prisma.bookCopy.findUnique({ where: { id: bookCopyId } });
+export async function shelveBookCopy(
+  organizationId: string,
+  bookCopyId: string,
+  shelfId: string,
+  userId: string,
+) {
+  const db = forOrg(organizationId);
+  const copy = await db.bookCopy.findFirst({ where: { id: bookCopyId } });
   if (!copy) throw new AppError(404, 'NOT_FOUND', 'Book copy not found');
   if (copy.status === 'CHECKED_OUT') {
     throw new AppError(409, 'RESOURCE_UNAVAILABLE', 'Cannot shelve a checked-out copy');
   }
 
-  const shelf = await prisma.shelfSection.findUnique({ where: { id: shelfId } });
+  const shelf = await db.shelfSection.findFirst({ where: { id: shelfId } });
   if (!shelf) throw new AppError(404, 'NOT_FOUND', 'Shelf section not found');
 
   const eventType = copy.shelfId ? 'MOVED' : 'SHELVED';
 
-  const [updated] = await prisma.$transaction([
-    prisma.bookCopy.update({
+  const [updated] = await db.$transaction([
+    db.bookCopy.update({
       where: { id: bookCopyId },
       data: { shelfId, status: 'AVAILABLE' },
       include: {
@@ -214,8 +228,14 @@ export async function shelveBookCopy(bookCopyId: string, shelfId: string, userId
   return updated;
 }
 
-export async function getBookCopyHistory(bookCopyId: string, page = 1, limit = 20) {
-  const copy = await prisma.bookCopy.findUnique({ where: { id: bookCopyId } });
+export async function getBookCopyHistory(
+  organizationId: string,
+  bookCopyId: string,
+  page = 1,
+  limit = 20,
+) {
+  const db = forOrg(organizationId);
+  const copy = await db.bookCopy.findFirst({ where: { id: bookCopyId } });
   if (!copy) throw new AppError(404, 'NOT_FOUND', 'Book copy not found');
 
   const total = await prisma.bookCopyEvent.count({ where: { bookCopyId } });
@@ -232,13 +252,12 @@ export async function getBookCopyHistory(bookCopyId: string, page = 1, limit = 2
   };
 }
 
-export async function fetchLoans(params: FetchLoansParams) {
+export async function fetchLoans(organizationId: string, params: FetchLoansParams) {
   const { userId, status, search, page = 1, limit = 20 } = params;
+  const db = forOrg(organizationId);
   const whereAnd: any[] = [];
 
-  if (userId) {
-    whereAnd.push({ userId });
-  }
+  if (userId) whereAnd.push({ userId });
 
   if (status === 'active') {
     whereAnd.push({ returnedAt: null });
@@ -265,8 +284,8 @@ export async function fetchLoans(params: FetchLoansParams) {
 
   const where = whereAnd.length > 0 ? { AND: whereAnd } : {};
 
-  const total = await prisma.loan.count({ where });
-  const loans = await prisma.loan.findMany({
+  const total = await db.loan.count({ where });
+  const loans = await db.loan.findMany({
     where,
     skip: (page - 1) * limit,
     take: limit,

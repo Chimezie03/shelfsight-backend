@@ -3,6 +3,10 @@ import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
+const DEFAULT_ORG_ID = '00000000-0000-0000-0000-000000000001';
+const DEFAULT_ORG_NAME = 'ShelfSight Library';
+const DEFAULT_ORG_SLUG = 'shelfsight-library';
+
 async function main() {
   const defaultPassword = await bcrypt.hash('password123', 12);
 
@@ -14,18 +18,27 @@ async function main() {
   await prisma.bookCopy.deleteMany();
   await prisma.book.deleteMany();
   await prisma.shelfSection.deleteMany();
+  await prisma.invite.deleteMany();
   await prisma.user.deleteMany();
+  await prisma.ingestionJob.deleteMany();
+  // Don't delete Organization rows that may already be backfilled by migration.
+
+  console.log('Seeding default Organization...');
+  await prisma.organization.upsert({
+    where: { id: DEFAULT_ORG_ID },
+    update: { name: DEFAULT_ORG_NAME, slug: DEFAULT_ORG_SLUG },
+    create: { id: DEFAULT_ORG_ID, name: DEFAULT_ORG_NAME, slug: DEFAULT_ORG_SLUG },
+  });
 
   console.log('Seeding Users...');
-  // 1 Admin, 3 Staff, 10 Patrons
   const admin = await prisma.user.create({
-    data: { email: 'admin@shelfsight.com', passwordHash: defaultPassword, name: 'Alice Admin', role: Role.ADMIN },
+    data: { email: 'admin@shelfsight.com', passwordHash: defaultPassword, name: 'Alice Admin', role: Role.ADMIN, organizationId: DEFAULT_ORG_ID },
   });
 
   const staff = [];
-  staff.push(await prisma.user.create({ data: { email: 'maria.staff@shelfsight.com', passwordHash: defaultPassword, name: 'Maria Staff', role: Role.STAFF } }));
-  staff.push(await prisma.user.create({ data: { email: 'john.staff@shelfsight.com', passwordHash: defaultPassword, name: 'John Staff', role: Role.STAFF } }));
-  staff.push(await prisma.user.create({ data: { email: 'liam.staff@shelfsight.com', passwordHash: defaultPassword, name: 'Liam Staff', role: Role.STAFF } }));
+  staff.push(await prisma.user.create({ data: { email: 'maria.staff@shelfsight.com', passwordHash: defaultPassword, name: 'Maria Staff', role: Role.STAFF, organizationId: DEFAULT_ORG_ID } }));
+  staff.push(await prisma.user.create({ data: { email: 'john.staff@shelfsight.com', passwordHash: defaultPassword, name: 'John Staff', role: Role.STAFF, organizationId: DEFAULT_ORG_ID } }));
+  staff.push(await prisma.user.create({ data: { email: 'liam.staff@shelfsight.com', passwordHash: defaultPassword, name: 'Liam Staff', role: Role.STAFF, organizationId: DEFAULT_ORG_ID } }));
 
   const patronNames = ['Emma Patron', 'Noah Williams', 'Olivia Brown', 'James Jones', 'Ava Garcia', 'Isabella Miller', 'Sophia Davis', 'Mia Rodriguez', 'Charlotte Martinez', 'Amelia Hernandez', 'Harper Lopez', 'Evelyn Gonzalez'];
   const patrons = [];
@@ -33,7 +46,7 @@ async function main() {
     const name = patronNames[i];
     patrons.push(
       await prisma.user.create({
-        data: { email: `patron${i + 1}@shelfsight.com`, passwordHash: defaultPassword, name, role: Role.PATRON }
+        data: { email: `patron${i + 1}@shelfsight.com`, passwordHash: defaultPassword, name, role: Role.PATRON, organizationId: DEFAULT_ORG_ID }
       })
     );
   }
@@ -52,20 +65,20 @@ async function main() {
   ];
   const shelves = [];
   for (const s of shelvesData) {
-    shelves.push(await prisma.shelfSection.create({ data: s }));
+    shelves.push(await prisma.shelfSection.create({ data: { ...s, organizationId: DEFAULT_ORG_ID } }));
   }
 
   const getShelfForDewey = (dewey: string | null) => {
-    if (!dewey) return shelves[8]; // New arrivals
+    if (!dewey) return shelves[8];
     const num = parseFloat(dewey);
     if (num >= 800 && num < 899) {
       return shelves[Math.floor(Math.random() * 3)];
     }
-    if (num >= 500 && num < 600) return shelves[3]; // Science
-    if (num >= 900 && num < 999) return shelves[4]; // History
-    if (num >= 600 && num < 700) return shelves[5]; // Technology
-    if (num >= 700 && num < 800) return shelves[6]; // Arts
-    if (num >= 100 && num < 200) return shelves[7]; // Philosophy
+    if (num >= 500 && num < 600) return shelves[3];
+    if (num >= 900 && num < 999) return shelves[4];
+    if (num >= 600 && num < 700) return shelves[5];
+    if (num >= 700 && num < 800) return shelves[6];
+    if (num >= 100 && num < 200) return shelves[7];
     return shelves[8];
   };
 
@@ -125,31 +138,30 @@ async function main() {
 
   const dbBooks = [];
   for (const b of bookList) {
-    dbBooks.push(await prisma.book.create({ data: b }));
+    dbBooks.push(await prisma.book.create({ data: { ...b, organizationId: DEFAULT_ORG_ID } }));
   }
 
   console.log('Seeding Book Copies & Events & Loans...');
-  
+
   for (let i = 0; i < dbBooks.length; i++) {
     const book = dbBooks[i];
     const shelf = getShelfForDewey(book.deweyDecimal);
-    
-    // Create 2 copies for each book
+
     for (let c = 1; c <= 2; c++) {
       const barcode = `${book.isbn}-${c}`;
       let status = CopyStatus.AVAILABLE;
       let finalShelfId: string | null = shelf.id;
-      
+
       const copy = await prisma.bookCopy.create({
         data: {
           bookId: book.id,
           barcode,
           status,
-          shelfId: finalShelfId
+          shelfId: finalShelfId,
+          organizationId: DEFAULT_ORG_ID,
         }
       });
 
-      // Add a SHELVED event
       await prisma.bookCopyEvent.create({
         data: {
           bookCopyId: copy.id,
@@ -162,14 +174,12 @@ async function main() {
     }
   }
 
-  // Now selectively check out some books and create loans (Historical & Active)
   let loanCount = 0;
 
   for (let i = 0; i < dbBooks.length; i++) {
     const book = dbBooks[i];
     const copies = await prisma.bookCopy.findMany({ where: { bookId: book.id } });
-    
-    // Copy 1: Sometimes has a completed past loan
+
     if (i % 3 === 0) {
       const copy = copies[0];
       const patron = patrons[i % patrons.length];
@@ -179,7 +189,6 @@ async function main() {
       const dueDate = new Date(checkoutDate);
       dueDate.setDate(dueDate.getDate() + 14);
 
-      // Alternate: some returned on time, some returned late
       const isLateReturn = i % 6 === 0;
       const returnedDate = new Date(checkoutDate);
       returnedDate.setDate(returnedDate.getDate() + (isLateReturn ? 20 : 12));
@@ -194,7 +203,8 @@ async function main() {
           checkedOutAt: checkoutDate,
           dueDate: dueDate,
           returnedAt: returnedDate,
-          fineAmount: fineAmt
+          fineAmount: fineAmt,
+          organizationId: DEFAULT_ORG_ID,
         }
       });
       loanCount++;
@@ -208,12 +218,11 @@ async function main() {
       });
     }
 
-    // Copy 2: sometimes currently checked out (active or overdue)
     if (i % 2 === 0) {
       const copy = copies[1];
       const patron = patrons[(i + 5) % patrons.length];
       const isOverdue = i % 4 === 0;
-      
+
       const checkoutDate = new Date();
       checkoutDate.setDate(checkoutDate.getDate() - (isOverdue ? 25 : 5));
       const dueDate = new Date(checkoutDate);
@@ -225,6 +234,7 @@ async function main() {
           bookCopyId: copy.id,
           checkedOutAt: checkoutDate,
           dueDate: dueDate,
+          organizationId: DEFAULT_ORG_ID,
         }
       });
       loanCount++;
@@ -252,10 +262,8 @@ async function main() {
     await prisma.bookCopyEvent.create({ data: { bookCopyId: processingCopy.id, type: CopyEventType.MARKED_PROCESSING, userId: admin.id, createdAt: new Date() } });
   }
 
-  // ── Seed Fines & Transaction Logs ──────────────────────────────────
   console.log('Seeding Fines & Transaction Logs...');
 
-  // Find returned loans that were overdue (fineAmount > 0)
   const overdueReturnedLoans = await prisma.loan.findMany({
     where: { returnedAt: { not: null }, fineAmount: { gt: 0 } },
     include: {
@@ -274,21 +282,12 @@ async function main() {
         status: FineStatus.UNPAID,
         reason: 'Overdue',
         createdAt: loan.returnedAt!,
+        organizationId: DEFAULT_ORG_ID,
       },
     });
     fineCount++;
   }
 
-  // Create fines for currently overdue active loans (preview fines)
-  const activeOverdueLoans = await prisma.loan.findMany({
-    where: { returnedAt: null, dueDate: { lt: new Date() } },
-    include: {
-      user: { select: { id: true, name: true, email: true } },
-      bookCopy: { include: { book: { select: { title: true } } } },
-    },
-  });
-
-  // Also create some paid & waived fines for variety
   const paidFineLoans = overdueReturnedLoans.slice(0, 2);
   for (const loan of paidFineLoans) {
     const existingFine = await prisma.fine.findFirst({ where: { loanId: loan.id } });
@@ -311,7 +310,6 @@ async function main() {
     }
   }
 
-  // Seed transaction logs from existing loans
   const allLoans = await prisma.loan.findMany({
     include: {
       user: { select: { id: true, name: true, email: true } },
@@ -329,6 +327,7 @@ async function main() {
     processedBy: string;
     details: string;
     createdAt: Date;
+    organizationId: string;
   }[] = [];
 
   for (const loan of allLoans) {
@@ -341,6 +340,7 @@ async function main() {
       processedBy: staff[Math.floor(Math.random() * staff.length)].name,
       details: `Checked out for 14 days, due ${loan.dueDate.toISOString().slice(0, 10)}`,
       createdAt: loan.checkedOutAt,
+      organizationId: DEFAULT_ORG_ID,
     });
 
     if (loan.returnedAt) {
@@ -355,11 +355,11 @@ async function main() {
           ? `Returned late, fine of $${loan.fineAmount.toFixed(2)} applied`
           : 'Returned on time, no fines',
         createdAt: loan.returnedAt,
+        organizationId: DEFAULT_ORG_ID,
       });
     }
   }
 
-  // Add FINE_PAID and FINE_WAIVED transactions for the fines we marked above
   for (const loan of paidFineLoans) {
     txData.push({
       type: TransactionType.FINE_PAID,
@@ -370,6 +370,7 @@ async function main() {
       processedBy: 'Alice Admin',
       details: `Fine of $${loan.fineAmount.toFixed(2)} paid`,
       createdAt: new Date(),
+      organizationId: DEFAULT_ORG_ID,
     });
   }
   for (const loan of waivedFineLoans) {
@@ -382,6 +383,7 @@ async function main() {
       processedBy: 'Alice Admin',
       details: `Fine of $${loan.fineAmount.toFixed(2)} waived`,
       createdAt: new Date(),
+      organizationId: DEFAULT_ORG_ID,
     });
   }
 

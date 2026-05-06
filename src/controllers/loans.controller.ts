@@ -9,7 +9,15 @@ import {
 } from '../services/loans.service';
 import { AppError } from '../lib/errors';
 
+function requireOrg(req: Request): string {
+  if (!req.user) {
+    throw new AppError(401, 'UNAUTHORIZED', 'Not authenticated');
+  }
+  return req.user.organizationId;
+}
+
 export async function checkout(req: Request, res: Response) {
+  const orgId = requireOrg(req);
   const { bookCopyId, dueDays, userId: targetUserId } = req.body;
 
   if (!bookCopyId) {
@@ -23,11 +31,12 @@ export async function checkout(req: Request, res: Response) {
       ? targetUserId
       : req.user?.userId;
 
-  const loan = await checkoutService(userId!, bookCopyId, dueDays);
+  const loan = await checkoutService(orgId, userId!, bookCopyId, dueDays);
   res.status(201).json(loan);
 }
 
 export async function checkin(req: Request, res: Response) {
+  const orgId = requireOrg(req);
   const { loanId } = req.body;
 
   if (!loanId) {
@@ -36,13 +45,14 @@ export async function checkin(req: Request, res: Response) {
     });
   }
 
-  const loan = await checkinService(loanId);
+  const loan = await checkinService(orgId, loanId);
   res.json(loan);
 }
 
 const VALID_LOAN_STATUSES = new Set(['active', 'returned', 'overdue']);
 
 export async function getLoans(req: Request, res: Response) {
+  const orgId = requireOrg(req);
   const { userId, status, search, page = 1, limit = 20 } = req.query;
 
   const MAX_LIMIT = 100;
@@ -61,7 +71,7 @@ export async function getLoans(req: Request, res: Response) {
     ? (typeof userId === 'string' ? userId : undefined)
     : req.user!.userId;
 
-  const loans = await fetchLoans({
+  const loans = await fetchLoans(orgId, {
     userId: effectiveUserId,
     status: safeStatus,
     search: typeof search === 'string' ? search : undefined,
@@ -73,11 +83,13 @@ export async function getLoans(req: Request, res: Response) {
 }
 
 export async function getCopyLocation(req: Request, res: Response) {
-  const location = await getBookCopyLocation(req.params.copyId);
+  const orgId = requireOrg(req);
+  const location = await getBookCopyLocation(orgId, req.params.copyId);
   res.json(location);
 }
 
 export async function shelveCopy(req: Request, res: Response) {
+  const orgId = requireOrg(req);
   const { shelfId } = req.body;
   if (!shelfId) {
     throw new AppError(400, 'VALIDATION_ERROR', 'Missing required field: shelfId', {
@@ -85,12 +97,13 @@ export async function shelveCopy(req: Request, res: Response) {
     });
   }
 
-  const result = await shelveBookCopy(req.params.copyId, shelfId, req.user!.userId);
+  const result = await shelveBookCopy(orgId, req.params.copyId, shelfId, req.user!.userId);
   res.json(result);
 }
 
 export async function getCopyHistory(req: Request, res: Response) {
+  const orgId = requireOrg(req);
   const { page = 1, limit = 20 } = req.query;
-  const history = await getBookCopyHistory(req.params.copyId, Number(page), Number(limit));
+  const history = await getBookCopyHistory(orgId, req.params.copyId, Number(page), Number(limit));
   res.json(history);
 }

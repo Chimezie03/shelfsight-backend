@@ -15,12 +15,14 @@ import * as loansService from '../src/services/loans.service';
 
 const fetchLoansMock = vi.mocked(loansService.fetchLoans);
 
+const ORG_ID = 'org-1';
+
 describe('loans.controller', () => {
   beforeEach(() => {
     fetchLoansMock.mockReset();
   });
 
-  it('passes search/status/user query params to fetchLoans', async () => {
+  it('passes search/status/user query params and the caller org to fetchLoans', async () => {
     const mockPayload = {
       data: [],
       pagination: { page: 1, limit: 20, total: 0, totalPages: 0 },
@@ -28,6 +30,14 @@ describe('loans.controller', () => {
     fetchLoansMock.mockResolvedValue(mockPayload);
 
     const req = {
+      user: {
+        userId: 'admin-1',
+        role: 'ADMIN',
+        name: 'Alice',
+        email: 'a@example.com',
+        organizationId: ORG_ID,
+        organizationName: 'Test',
+      },
       query: {
         userId: 'u1',
         status: 'active',
@@ -35,7 +45,6 @@ describe('loans.controller', () => {
         page: '2',
         limit: '25',
       },
-      user: { userId: 'staff-id', role: 'STAFF', name: 'Staff', email: 'staff@test.com' },
     } as unknown as Request;
 
     const json = vi.fn();
@@ -43,7 +52,7 @@ describe('loans.controller', () => {
 
     await getLoans(req, res);
 
-    expect(fetchLoansMock).toHaveBeenCalledWith({
+    expect(fetchLoansMock).toHaveBeenCalledWith(ORG_ID, {
       userId: 'u1',
       status: 'active',
       search: 'dune herbert 9780441172719',

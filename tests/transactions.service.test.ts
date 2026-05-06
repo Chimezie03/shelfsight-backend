@@ -1,17 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../src/lib/prisma', () => ({
-  default: {
-    transactionLog: {
-      count: vi.fn(),
-      findMany: vi.fn(),
-      create: vi.fn(),
-    },
+const { txMock } = vi.hoisted(() => ({
+  txMock: {
+    count: vi.fn(),
+    findMany: vi.fn(),
+    create: vi.fn(),
   },
 }));
 
-import prisma from '../src/lib/prisma';
+vi.mock('../src/lib/prisma', () => ({
+  default: { transactionLog: txMock },
+  forOrg: () => ({ transactionLog: txMock }),
+}));
+
 import { fetchTransactions, createTransaction } from '../src/services/transactions.service';
+
+const ORG_ID = 'org-1';
 
 const makeTxRow = (overrides: Record<string, any> = {}) => ({
   id: 'tx-1',
@@ -28,17 +32,17 @@ const makeTxRow = (overrides: Record<string, any> = {}) => ({
 
 describe('transactions.service', () => {
   beforeEach(() => {
-    vi.mocked(prisma.transactionLog.count).mockReset();
-    vi.mocked(prisma.transactionLog.findMany).mockReset();
-    vi.mocked(prisma.transactionLog.create).mockReset();
+    txMock.count.mockReset();
+    txMock.findMany.mockReset();
+    txMock.create.mockReset();
   });
 
   describe('fetchTransactions', () => {
     it('returns paginated transactions with mapped response', async () => {
-      vi.mocked(prisma.transactionLog.count).mockResolvedValue(1);
-      vi.mocked(prisma.transactionLog.findMany).mockResolvedValue([makeTxRow()] as any);
+      txMock.count.mockResolvedValue(1);
+      txMock.findMany.mockResolvedValue([makeTxRow()] as any);
 
-      const result = await fetchTransactions({ page: 1, limit: 10 });
+      const result = await fetchTransactions(ORG_ID, { page: 1, limit: 10 });
 
       expect(result.data).toHaveLength(1);
       expect(result.data[0]).toMatchObject({
@@ -56,23 +60,23 @@ describe('transactions.service', () => {
     });
 
     it('filters by type', async () => {
-      vi.mocked(prisma.transactionLog.count).mockResolvedValue(0);
-      vi.mocked(prisma.transactionLog.findMany).mockResolvedValue([]);
+      txMock.count.mockResolvedValue(0);
+      txMock.findMany.mockResolvedValue([]);
 
-      await fetchTransactions({ type: 'CHECKIN' });
+      await fetchTransactions(ORG_ID, { type: 'CHECKIN' });
 
-      expect(prisma.transactionLog.count).toHaveBeenCalledWith({
+      expect(txMock.count).toHaveBeenCalledWith({
         where: { AND: [{ type: 'CHECKIN' }] },
       });
     });
 
     it('filters by search term', async () => {
-      vi.mocked(prisma.transactionLog.count).mockResolvedValue(0);
-      vi.mocked(prisma.transactionLog.findMany).mockResolvedValue([]);
+      txMock.count.mockResolvedValue(0);
+      txMock.findMany.mockResolvedValue([]);
 
-      await fetchTransactions({ search: 'dune' });
+      await fetchTransactions(ORG_ID, { search: 'dune' });
 
-      const call = vi.mocked(prisma.transactionLog.count).mock.calls[0][0] as any;
+      const call = txMock.count.mock.calls[0][0] as any;
       const orFilters = call.where.AND[0].OR;
       expect(orFilters).toHaveLength(4);
       expect(orFilters[0]).toEqual({
@@ -81,24 +85,24 @@ describe('transactions.service', () => {
     });
 
     it('filters by date range', async () => {
-      vi.mocked(prisma.transactionLog.count).mockResolvedValue(0);
-      vi.mocked(prisma.transactionLog.findMany).mockResolvedValue([]);
+      txMock.count.mockResolvedValue(0);
+      txMock.findMany.mockResolvedValue([]);
 
-      await fetchTransactions({ dateFrom: '2026-04-01', dateTo: '2026-04-14' });
+      await fetchTransactions(ORG_ID, { dateFrom: '2026-04-01', dateTo: '2026-04-14' });
 
-      const call = vi.mocked(prisma.transactionLog.count).mock.calls[0][0] as any;
+      const call = txMock.count.mock.calls[0][0] as any;
       const andFilters = call.where.AND;
       expect(andFilters).toHaveLength(2);
       expect(andFilters[0].createdAt.gte).toEqual(new Date('2026-04-01'));
     });
 
     it('paginates correctly', async () => {
-      vi.mocked(prisma.transactionLog.count).mockResolvedValue(50);
-      vi.mocked(prisma.transactionLog.findMany).mockResolvedValue([]);
+      txMock.count.mockResolvedValue(50);
+      txMock.findMany.mockResolvedValue([]);
 
-      const result = await fetchTransactions({ page: 3, limit: 10 });
+      const result = await fetchTransactions(ORG_ID, { page: 3, limit: 10 });
 
-      expect(prisma.transactionLog.findMany).toHaveBeenCalledWith(
+      expect(txMock.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ skip: 20, take: 10 }),
       );
       expect(result.pagination).toEqual({ page: 3, limit: 10, total: 50, totalPages: 5 });
@@ -107,9 +111,9 @@ describe('transactions.service', () => {
 
   describe('createTransaction', () => {
     it('creates a transaction log record', async () => {
-      vi.mocked(prisma.transactionLog.create).mockResolvedValue(makeTxRow() as any);
+      txMock.create.mockResolvedValue(makeTxRow() as any);
 
-      await createTransaction({
+      await createTransaction(ORG_ID, {
         type: 'CHECKOUT',
         loanId: 'loan-1',
         bookTitle: 'Dune',
@@ -119,7 +123,7 @@ describe('transactions.service', () => {
         details: 'Checked out for 14 days',
       });
 
-      expect(prisma.transactionLog.create).toHaveBeenCalledWith({
+      expect(txMock.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           type: 'CHECKOUT',
           loanId: 'loan-1',

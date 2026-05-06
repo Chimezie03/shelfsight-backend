@@ -11,13 +11,7 @@ import { httpAccessLog } from './lib/http-access-log';
 import routes from './routes';
 import { errorHandler } from './middleware/error-handler';
 
-declare global {
-  namespace Express {
-    interface Request {
-      user?: { userId: string; role: string; name: string; email: string };
-    }
-  }
-}
+// Request type augmentation lives in src/types/express.d.ts.
 
 dotenv.config();
 
