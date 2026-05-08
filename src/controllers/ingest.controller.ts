@@ -409,7 +409,7 @@ export async function getJob(req: Request, res: Response) {
 
 export async function approveJob(req: Request, res: Response) {
   const orgId = requireOrg(req);
-  const { title, author, isbn, genre, deweyDecimal, coverImageUrl, publishYear, language } =
+  const { title, author, isbn, genre, deweyDecimal, coverImageUrl, publishYear, language, copies } =
     req.body;
 
   if (!title || !author || !isbn) {
@@ -426,7 +426,7 @@ export async function approveJob(req: Request, res: Response) {
   const result = await approveIngestionJob(
     orgId,
     req.params.id,
-    { title, author, isbn, genre, deweyDecimal, coverImageUrl, publishYear, language },
+    { title, author, isbn, genre, deweyDecimal, coverImageUrl, publishYear, language, copies },
     reviewedBy,
   );
 

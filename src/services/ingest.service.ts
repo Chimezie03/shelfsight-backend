@@ -888,6 +888,7 @@ export async function approveIngestionJob(
     coverImageUrl?: string;
     publishYear?: string;
     language?: string;
+    copies?: number;
   },
   reviewedBy: string,
 ) {
@@ -904,6 +905,12 @@ export async function approveIngestionJob(
     );
   }
 
+  const requestedCopies = Number(overrides.copies);
+  const copiesCount = Number.isFinite(requestedCopies)
+    ? Math.max(0, Math.min(1000, Math.trunc(requestedCopies)))
+    : 1;
+  const cleanIsbn = String(overrides.isbn).replace(/-/g, '');
+
   const result = await db.$transaction(async (tx) => {
     const book = await tx.book.create({
       data: {
@@ -915,15 +922,16 @@ export async function approveIngestionJob(
         language: overrides.language || job.language || 'English',
         coverImageUrl: overrides.coverImageUrl || null,
         publishYear: overrides.publishYear || null,
-      } as any,
-    });
-
-    const barcode = `BC-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-    await tx.bookCopy.create({
-      data: {
-        bookId: book.id,
-        barcode,
-        status: 'PROCESSING',
+        copies:
+          copiesCount > 0
+            ? {
+                create: Array.from({ length: copiesCount }, (_, i) => ({
+                  barcode: `${cleanIsbn}-${i + 1}`,
+                  status: 'AVAILABLE',
+                  organizationId,
+                })),
+              }
+            : undefined,
       } as any,
     });
 
