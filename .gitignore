@@ -8,6 +8,11 @@ dev_commands.txt
 Project Proposal Team 10
 api_todo_reference.txt
 
+# OS / editor / build output
+.DS_Store
+.next/
+test-results/
+
 # Railway (local config-as-code; keep out of GitHub)
 railway.json
 railway.toml
