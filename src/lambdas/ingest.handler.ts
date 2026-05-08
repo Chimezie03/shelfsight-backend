@@ -21,6 +21,7 @@ import {
   enrichMetadata,
   classifyDeweyDecimal,
 } from '../services/ingest.service';
+import prisma from '../lib/prisma';
 
 const awsRegion = process.env.AWS_REGION || 'us-east-1';
 const s3 = new S3Client({ region: awsRegion });
@@ -54,6 +55,7 @@ async function processRecord(record: SQSRecord): Promise<void> {
     s3Url: string;
     originalName: string;
     mimeType: string;
+    organizationId?: string;
   };
 
   if (body.action !== 'INGEST_ANALYZE') {
@@ -112,6 +114,33 @@ async function processRecord(record: SQSRecord): Promise<void> {
 
   console.log('[lambda] Result:', JSON.stringify(result, null, 2));
 
-  // TODO: persist result to the database (Prisma) or notify the client
-  //       via WebSocket / callback URL.
+  if (body.organizationId && process.env.DATABASE_URL) {
+    try {
+      const genre = metadata.subjects?.[0] ? String(metadata.subjects[0]) : null;
+      await prisma.ingestionJob.updateMany({
+        where: {
+          organizationId: body.organizationId,
+          imageUrl: body.s3Url,
+        },
+        data: {
+          status: 'COMPLETED',
+          ocrText: ocrText || null,
+          detectedIsbn: isbn,
+          suggestedDewey: dewey.dewey_class,
+          confidenceScore: dewey.confidence_score,
+          suggestedTitle: metadata.title,
+          suggestedAuthor: metadata.author,
+          suggestedPublisher: metadata.publisher,
+          suggestedPublishDate: metadata.publishDate,
+          suggestedGenre: genre,
+          coverImageUrl: metadata.coverImageUrl,
+          metadataSource: metadata.source,
+          deweyReasoning: dewey.reasoning,
+        },
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[lambda] Failed to persist ingestion job:', msg);
+    }
+  }
 }

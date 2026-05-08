@@ -1,6 +1,7 @@
 import type { Book, BookCopy, Prisma, ShelfSection } from '@prisma/client';
 import { forOrg } from '../lib/prisma';
 import { AppError } from '../lib/errors';
+import { enrichMetadata, normalizeIsbn, isValidIsbn } from './ingest.service';
 
 type CopyWithShelf = BookCopy & { shelf: ShelfSection | null };
 
@@ -30,6 +31,8 @@ interface FetchBooksParams {
   sortDir?: string;
   page?: number;
   limit?: number;
+  /** When true, only books with at least one AVAILABLE copy that has no shelf. */
+  unshelved?: boolean;
 }
 
 const CATEGORY_RANGES: Record<string, readonly [number, number]> = {
@@ -62,23 +65,39 @@ function chunkArray<T>(items: T[], size: number): T[][] {
   return chunks;
 }
 
-const bookPayload = (data: any) => ({
-  title: typeof data.title === 'string' ? data.title : String(data.title),
-  author: typeof data.author === 'string' ? data.author : String(data.author),
-  isbn: typeof data.isbn === 'string' ? data.isbn : String(data.isbn),
-  genre: data.genre ? String(data.genre) : undefined,
-  deweyDecimal: data.deweyDecimal != null ? String(data.deweyDecimal) : undefined,
-  language: data.language != null ? String(data.language) : undefined,
-  coverImageUrl: data.coverImageUrl != null ? String(data.coverImageUrl) : undefined,
-  publishYear: (data.publishYear ?? data.publishDate) != null ? String(data.publishYear ?? data.publishDate) : undefined,
-  pageCount: data.pageCount != null ? parseInt(data.pageCount, 10) || null : undefined,
-});
+/**
+ * Maps a request body into Book column updates. Only includes fields that
+ * were actually provided — coercing `undefined` with `String()` would write
+ * the literal string "undefined" to the DB, which corrupts catalog rows on
+ * partial updates (e.g. a shelf-only PUT from the catalog "Place here" UI).
+ */
+const bookPayload = (data: any) => {
+  const out: Record<string, unknown> = {};
+  if (data.title != null) out.title = String(data.title);
+  if (data.author != null) out.author = String(data.author);
+  if (data.isbn != null) out.isbn = String(data.isbn);
+  if (data.genre != null && data.genre !== '') out.genre = String(data.genre);
+  if (data.deweyDecimal != null) out.deweyDecimal = String(data.deweyDecimal);
+  if (data.language != null) out.language = String(data.language);
+  if (data.coverImageUrl != null) out.coverImageUrl = String(data.coverImageUrl);
+  const yearOrDate = data.publishYear ?? data.publishDate;
+  if (yearOrDate != null) out.publishYear = String(yearOrDate);
+  if (data.pageCount != null) out.pageCount = parseInt(data.pageCount, 10) || null;
+  return out;
+};
 
 function parseShelfTier(value: unknown): number | null | undefined {
   if (value === undefined) return undefined;
   if (value === null || value === '') return null;
   const n = parseInt(String(value), 10);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function parseShelfSlot(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  const n = parseInt(String(value), 10);
+  return Number.isFinite(n) && n >= 1 ? n : null;
 }
 
 /** Matches list-item shape expected by frontend `BackendBook` / catalog transforms. */
@@ -108,6 +127,7 @@ export function mapBookWithCopies(book: Book & { copies: CopyWithShelf[] }) {
     shelfId: shelf?.id ?? null,
     shelfLabel: shelf?.label ?? null,
     shelfTier: shelfCopy?.shelfTier ?? null,
+    shelfSlot: shelfCopy?.shelfSlot ?? null,
   };
 }
 
@@ -278,6 +298,8 @@ export async function createBookService(organizationId: string, data: any) {
   const shelfId = typeof data.shelfId === 'string' && data.shelfId ? data.shelfId : null;
   const tierValue = parseShelfTier(data.shelfTier);
   const shelfTier = tierValue === undefined ? null : tierValue;
+  const slotValue = parseShelfSlot(data.shelfSlot);
+  const shelfSlot = slotValue === undefined ? null : slotValue;
 
   const book = await db.book.create({
     data: {
@@ -291,6 +313,7 @@ export async function createBookService(organizationId: string, data: any) {
                 organizationId,
                 shelfId,
                 shelfTier,
+                shelfSlot,
               })),
             }
           : undefined,
@@ -514,6 +537,100 @@ export async function bulkCreateBooksService(organizationId: string, items: any[
   return results;
 }
 
+interface BulkIsbnResult {
+  total: number;
+  resolved: number;
+  unresolved: Array<{ isbn: string; reason: string }>;
+  created: number;
+  failed: number;
+  errors: Array<{ index: number; isbn: string; reason: string }>;
+}
+
+/**
+ * Bulk-create books from a list of ISBNs only — looks up title/author/etc.
+ * via Open Library + Google Books, then funnels resolved entries through
+ * bulkCreateBooksService. ISBNs that don't resolve are returned in `unresolved`.
+ */
+export async function bulkCreateBooksFromIsbnsService(
+  organizationId: string,
+  rawIsbns: string[],
+): Promise<BulkIsbnResult> {
+  if (!Array.isArray(rawIsbns)) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Payload must be { isbns: string[] }');
+  }
+
+  const total = rawIsbns.length;
+  const unresolved: Array<{ isbn: string; reason: string }> = [];
+  const enrichedItems: any[] = [];
+
+  // Normalize + dedupe; reject malformed ISBNs up front.
+  const seen = new Set<string>();
+  const queue: string[] = [];
+  for (const raw of rawIsbns) {
+    const trimmed = String(raw ?? '').trim();
+    if (!trimmed) {
+      unresolved.push({ isbn: '', reason: 'Empty value' });
+      continue;
+    }
+    const norm = normalizeIsbn(trimmed);
+    if (!isValidIsbn(norm)) {
+      unresolved.push({ isbn: trimmed, reason: 'Not a valid 10/13-digit ISBN' });
+      continue;
+    }
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+    queue.push(norm);
+  }
+
+  // Limit concurrency to be polite to Open Library (which has courtesy limits).
+  // 8 is a balance: still well under Open Library's ~100 req/min courtesy limit,
+  // and lets a chunk of ~25 ISBNs finish in ~3–5s before any proxy timeout.
+  const concurrency = toPositiveInt(process.env.ISBN_LOOKUP_CONCURRENCY, 8);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < queue.length) {
+      const idx = cursor++;
+      const isbn = queue[idx];
+      try {
+        const meta = await enrichMetadata(isbn);
+        if (!meta.title || !meta.author) {
+          unresolved.push({ isbn, reason: 'No metadata found in Open Library or Google Books' });
+          continue;
+        }
+        enrichedItems.push({
+          title: meta.title,
+          author: meta.author,
+          isbn,
+          genre: meta.subjects?.[0] ?? undefined,
+          language: null,
+          coverImageUrl: meta.coverImageUrl ?? undefined,
+          publishYear: meta.publishDate ?? undefined,
+          publisher: meta.publisher ?? undefined,
+          copies: 1,
+        });
+      } catch (err: any) {
+        unresolved.push({ isbn, reason: err?.message ? `Lookup error: ${err.message}` : 'Lookup error' });
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, () => worker()));
+
+  let createResult = { successful: 0, failed: 0, errors: [] as Array<{ index: number; isbn: string; reason: string }> };
+  if (enrichedItems.length > 0) {
+    const r = await bulkCreateBooksService(organizationId, enrichedItems);
+    createResult = { successful: r.successful, failed: r.failed, errors: r.errors };
+  }
+
+  return {
+    total,
+    resolved: enrichedItems.length,
+    unresolved,
+    created: createResult.successful,
+    failed: createResult.failed,
+    errors: createResult.errors,
+  };
+}
+
 export async function updateBookService(organizationId: string, id: string, data: any) {
   if (data.isbn) {
     const isbnErr = validateIsbn(data.isbn);
@@ -562,16 +679,27 @@ export async function updateBookService(organizationId: string, id: string, data
     }
 
     const tierUpdate = parseShelfTier(data.shelfTier);
-    if (data.shelfId !== undefined || tierUpdate !== undefined) {
-      const updateData: { shelfId?: string | null; shelfTier?: number | null } = {};
+    const slotUpdate = parseShelfSlot(data.shelfSlot);
+    if (data.shelfId !== undefined || tierUpdate !== undefined || slotUpdate !== undefined) {
+      const updateData: {
+        shelfId?: string | null;
+        shelfTier?: number | null;
+        shelfSlot?: number | null;
+      } = {};
       if (data.shelfId !== undefined) {
         updateData.shelfId = data.shelfId || null;
       }
       if (tierUpdate !== undefined) {
         updateData.shelfTier = tierUpdate;
       }
+      if (slotUpdate !== undefined) {
+        updateData.shelfSlot = slotUpdate;
+      }
       await tx.bookCopy.updateMany({
-        where: { bookId: id, status: 'AVAILABLE' },
+        where: {
+          bookId: id,
+          status: { in: ['AVAILABLE', 'PROCESSING'] },
+        },
         data: updateData,
       });
     }
@@ -643,6 +771,7 @@ export async function fetchBooks(organizationId: string, params: FetchBooksParam
     sortDir,
     page = 1,
     limit = 20,
+    unshelved,
   } = params;
 
   const safePage = Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1;
@@ -663,6 +792,12 @@ export async function fetchBooks(organizationId: string, params: FetchBooksParam
   }
   if (normalizedStatus) {
     whereClauses.push(buildStatusFilter(normalizedStatus));
+  }
+
+  if (unshelved) {
+    whereClauses.push({
+      copies: { some: { shelfId: null, status: 'AVAILABLE' } },
+    });
   }
 
   const normalizedSearch = search?.trim();

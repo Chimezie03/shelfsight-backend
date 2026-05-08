@@ -1,9 +1,11 @@
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import type { Role } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { normalizeEmail } from '../lib/email';
 import { AppError } from '../lib/errors';
+import { sendPasswordResetEmail } from '../lib/resend-mail';
 
 if (!process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET environment variable is required. Set it in your .env file.');
@@ -197,8 +199,6 @@ interface AcceptInviteInput {
   password: string;
 }
 
-import crypto from 'crypto';
-
 function hashToken(rawToken: string): string {
   return crypto.createHash('sha256').update(rawToken).digest('hex');
 }
@@ -301,4 +301,99 @@ export async function getInvitePreview(rawToken: string): Promise<{
     email: invite.email,
     expiresAt: invite.expiresAt,
   };
+}
+
+const RESET_TOKEN_BYTES = 32;
+const RESET_TOKEN_EXPIRY_MS = 60 * 60 * 1000; // 1 hour
+
+function webAppOrigin(): string {
+  const raw = process.env.WEB_BASE_URL || process.env.FRONTEND_URL || 'http://localhost:3000';
+  return raw.replace(/\/$/, '');
+}
+
+/**
+ * Always completes without throwing for unknown emails (anti-enumeration).
+ * Logs or emails a one-time reset link when the user exists.
+ */
+export async function requestPasswordReset(email: string): Promise<void> {
+  const trimmed = email?.trim() ?? '';
+  if (!trimmed || !EMAIL_PATTERN.test(normalizeEmail(trimmed))) {
+    return;
+  }
+
+  const normalizedEmail = normalizeEmail(trimmed);
+  const user = await prisma.user.findFirst({
+    where: { email: normalizedEmail },
+    select: { id: true, email: true },
+  });
+
+  if (!user) {
+    return;
+  }
+
+  await prisma.passwordResetToken.updateMany({
+    where: { userId: user.id, usedAt: null },
+    data: { usedAt: new Date() },
+  });
+
+  const rawToken = crypto.randomBytes(RESET_TOKEN_BYTES).toString('hex');
+  const tokenHash = hashToken(rawToken);
+  const expiresAt = new Date(Date.now() + RESET_TOKEN_EXPIRY_MS);
+
+  await prisma.passwordResetToken.create({
+    data: {
+      userId: user.id,
+      tokenHash,
+      expiresAt,
+    },
+  });
+
+  const resetLink = `${webAppOrigin()}/reset-password?token=${encodeURIComponent(rawToken)}`;
+
+  const mail = await sendPasswordResetEmail({ to: user.email, resetLink });
+  if (mail.ok) {
+    console.info(`[password-reset] email sent via Resend to ${user.email}`);
+  } else {
+    console.warn(
+      `[password-reset] email not sent (${mail.errorMessage ?? 'unknown'}); link for ${user.email}: ${resetLink}`,
+    );
+  }
+}
+
+export async function resetPasswordWithToken(rawToken: string, newPassword: string): Promise<void> {
+  const fieldErrors: Record<string, string> = {};
+  if (!rawToken?.trim()) fieldErrors.token = 'Required';
+  if (!newPassword) fieldErrors.password = 'Required';
+
+  if (Object.keys(fieldErrors).length > 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Validation failed', { fieldErrors });
+  }
+
+  if (newPassword.length < MIN_PASSWORD_LENGTH) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Validation failed', {
+      fieldErrors: { password: `Must be at least ${MIN_PASSWORD_LENGTH} characters` },
+    });
+  }
+
+  const tokenHash = hashToken(rawToken.trim());
+  const record = await prisma.passwordResetToken.findUnique({
+    where: { tokenHash },
+  });
+
+  if (!record || record.usedAt || record.expiresAt < new Date()) {
+    throw new AppError(400, 'RESET_TOKEN_INVALID', 'Reset link is invalid or has expired');
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 12);
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: record.userId },
+      data: { passwordHash },
+    }),
+    prisma.passwordResetToken.update({
+      where: { id: record.id },
+      data: { usedAt: new Date() },
+    }),
+  ]);
 }

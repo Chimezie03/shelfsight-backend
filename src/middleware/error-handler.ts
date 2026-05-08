@@ -82,6 +82,16 @@ export const errorHandler: ErrorRequestHandler = (
         message = 'Operation conflicts with related records';
         details = { field: err.meta?.field_name };
         break;
+      case 'P2021':
+        statusCode = 503;
+        code = 'DATABASE_SCHEMA';
+        message =
+          process.env.NODE_ENV === 'production'
+            ? 'This action is temporarily unavailable. Please try again shortly.'
+            : `Missing database table (apply migrations): ${String(err.meta?.table ?? '')}`;
+        details =
+          process.env.NODE_ENV === 'production' ? {} : { table: err.meta?.table };
+        break;
       default:
         code = 'DATABASE_ERROR';
         message = 'Database operation failed';

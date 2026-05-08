@@ -10,6 +10,7 @@ import {
   getBookCopiesByShelf,
   syncMapLayout,
 } from '../services/map.service';
+import { getShelfPlacementHints, getShelfPlacementHintsForBook } from '../services/mapPlacementHints.service';
 import { AppError } from '../lib/errors';
 
 function requireOrg(req: Request): string {
@@ -17,6 +18,19 @@ function requireOrg(req: Request): string {
     throw new AppError(401, 'UNAUTHORIZED', 'Not authenticated');
   }
   return req.user.organizationId;
+}
+
+export async function placementHints(req: Request, res: Response) {
+  const orgId = requireOrg(req);
+  const raw = req.query.bookId;
+  const bookId = typeof raw === 'string' && raw.trim() ? raw.trim() : undefined;
+  if (bookId) {
+    const data = await getShelfPlacementHintsForBook(orgId, bookId);
+    res.json({ success: true, data });
+    return;
+  }
+  const data = await getShelfPlacementHints(orgId);
+  res.json({ success: true, data });
 }
 
 export async function listSections(req: Request, res: Response) {
