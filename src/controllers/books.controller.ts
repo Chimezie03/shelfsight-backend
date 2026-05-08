@@ -5,6 +5,7 @@ import {
   fetchBookById,
   createBookService,
   bulkCreateBooksService,
+  bulkCreateBooksFromIsbnsService,
   updateBookService,
   deleteBookService,
   deleteAllBooksService,
@@ -35,6 +36,7 @@ export async function getBooks(req: Request, res: Response) {
     sortDir,
     page = 1,
     limit = 20,
+    unshelved,
   } = req.query;
 
   const MAX_LIMIT = 100;
@@ -45,6 +47,9 @@ export async function getBooks(req: Request, res: Response) {
     typeof yearMin === 'string' && yearMin.trim() !== '' ? Number(yearMin) : undefined;
   const parsedYearMax =
     typeof yearMax === 'string' && yearMax.trim() !== '' ? Number(yearMax) : undefined;
+
+  const unshelvedOnly =
+    typeof unshelved === 'string' && (unshelved === '1' || unshelved.toLowerCase() === 'true');
 
   const books = await fetchBooks(orgId, {
     search: typeof search === 'string' ? search : undefined,
@@ -61,6 +66,7 @@ export async function getBooks(req: Request, res: Response) {
     sortDir: typeof sortDir === 'string' ? sortDir : undefined,
     page: parsedPage,
     limit: parsedLimit,
+    unshelved: unshelvedOnly || undefined,
   });
   res.json(books);
 }
@@ -129,6 +135,25 @@ export async function bulkUploadFile(req: Request, res: Response) {
 export async function bulkCreateBooks(req: Request, res: Response) {
   const orgId = requireOrg(req);
   const result = await bulkCreateBooksService(orgId, req.body);
+  res.status(201).json(result);
+}
+
+export async function bulkCreateBooksFromIsbns(req: Request, res: Response) {
+  const orgId = requireOrg(req);
+  const isbns = Array.isArray(req.body?.isbns) ? req.body.isbns : null;
+  if (!isbns) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Body must be { "isbns": string[] }');
+  }
+  const MAX = 1000;
+  if (isbns.length > MAX) {
+    throw new AppError(
+      400,
+      'VALIDATION_ERROR',
+      `Too many ISBNs in one request (max ${MAX}). Split into smaller batches.`,
+      { limit: MAX, received: isbns.length },
+    );
+  }
+  const result = await bulkCreateBooksFromIsbnsService(orgId, isbns);
   res.status(201).json(result);
 }
 

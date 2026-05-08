@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { forOrg } from '../lib/prisma';
 import { AppError } from '../lib/errors';
@@ -15,6 +16,8 @@ export interface ShelfSectionPayload {
   deweyRangeEnd?: string | null;
   numberOfTiers?: number | null;
   capacityPerTier?: number | null;
+  /** Per-tier capacity when set (same length as tiers). */
+  tierCapacities?: number[] | null;
   color?: string | null;
   rotation?: number | null;
   notes?: string | null;
@@ -54,6 +57,19 @@ function collectFieldErrors(body: Record<string, unknown>): Record<string, strin
   return Object.keys(fieldErrors).length > 0 ? fieldErrors : null;
 }
 
+function parseTierCapacities(value: unknown): number[] | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (!Array.isArray(value)) return null;
+  const out: number[] = [];
+  for (const el of value) {
+    const n = typeof el === 'number' ? el : parseInt(String(el), 10);
+    if (!Number.isFinite(n) || n < 1) return null;
+    out.push(Math.floor(n));
+  }
+  return out.length > 0 ? out : null;
+}
+
 function parseOptionalFields(o: Record<string, unknown>): Partial<ShelfSectionPayload> {
   const out: Partial<ShelfSectionPayload> = {};
 
@@ -70,6 +86,10 @@ function parseOptionalFields(o: Record<string, unknown>): Partial<ShelfSectionPa
         out[key] = v;
       }
     }
+  }
+
+  if ('tierCapacities' in o) {
+    out.tierCapacities = parseTierCapacities(o.tierCapacities) ?? null;
   }
 
   return out;
@@ -136,6 +156,11 @@ export function parseShelfSectionPartial(body: unknown): Partial<ShelfSectionPay
 
   Object.assign(out, parseOptionalFields(o));
 
+  if ('tierCapacities' in o) {
+    (out as Partial<ShelfSectionPayload>).tierCapacities =
+      parseTierCapacities(o.tierCapacities) ?? null;
+  }
+
   if (Object.keys(out).length === 0) {
     throw new AppError(400, 'VALIDATION_ERROR', 'No valid fields to update', { fieldErrors: {} });
   }
@@ -144,6 +169,13 @@ export function parseShelfSectionPartial(body: unknown): Partial<ShelfSectionPay
 }
 
 function toResponse(section: any) {
+  const rawCaps = section.tierCapacities;
+  const tierCapacities = Array.isArray(rawCaps)
+    ? rawCaps
+        .map((x: unknown) => (typeof x === 'number' ? x : parseInt(String(x), 10)))
+        .filter((n: number) => Number.isFinite(n) && n >= 1)
+    : null;
+
   return {
     id: section.id,
     label: section.label,
@@ -158,6 +190,7 @@ function toResponse(section: any) {
     deweyRangeEnd: section.deweyRangeEnd ?? null,
     numberOfTiers: section.numberOfTiers ?? 4,
     capacityPerTier: section.capacityPerTier ?? 30,
+    tierCapacities: tierCapacities && tierCapacities.length > 0 ? tierCapacities : null,
     color: section.color ?? '#1B2A4A',
     rotation: section.rotation ?? 0,
     notes: section.notes ?? null,
@@ -206,6 +239,10 @@ export async function createShelfSection(organizationId: string, payload: ShelfS
       deweyRangeEnd: payload.deweyRangeEnd ?? null,
       numberOfTiers: payload.numberOfTiers ?? null,
       capacityPerTier: payload.capacityPerTier ?? null,
+      tierCapacities:
+        payload.tierCapacities != null && payload.tierCapacities.length > 0
+          ? (payload.tierCapacities as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
       color: payload.color ?? null,
       rotation: payload.rotation ?? null,
       notes: payload.notes ?? null,
@@ -229,9 +266,18 @@ export async function updateShelfSection(
       throw new AppError(404, 'SHELF_SECTION_NOT_FOUND', 'Shelf section not found');
     }
 
+    const data: Record<string, unknown> = { ...partial };
+    if ('tierCapacities' in data) {
+      const tc = data.tierCapacities as number[] | null | undefined;
+      data.tierCapacities =
+        tc == null || !Array.isArray(tc) || tc.length === 0
+          ? Prisma.JsonNull
+          : tc;
+    }
+
     const row = await db.shelfSection.update({
       where: { id },
-      data: partial,
+      data: data as any,
       include: { _count: { select: { copies: true } } },
     });
     return toResponse(row);
@@ -275,7 +321,7 @@ export async function getBookCopiesByShelf(organizationId: string, shelfId: stri
         take: 1,
       },
     },
-    orderBy: { book: { deweyDecimal: 'asc' } },
+    orderBy: [{ shelfTier: 'asc' }, { shelfSlot: 'asc' }, { book: { deweyDecimal: 'asc' } }],
   });
 
   return copies.map((copy) => ({
@@ -284,6 +330,7 @@ export async function getBookCopiesByShelf(organizationId: string, shelfId: stri
     status: copy.status,
     shelfId: copy.shelfId,
     shelfTier: copy.shelfTier,
+    shelfSlot: copy.shelfSlot,
     book: {
       id: copy.book.id,
       title: copy.book.title,
@@ -316,6 +363,7 @@ interface LayoutSection {
   deweyRangeEnd?: string | null;
   numberOfTiers?: number | null;
   capacityPerTier?: number | null;
+  tierCapacities?: number[] | null;
   color?: string | null;
   rotation?: number | null;
   notes?: string | null;
@@ -339,6 +387,9 @@ export async function syncMapLayout(organizationId: string, sections: LayoutSect
 
     const results = [];
     for (const section of sections) {
+      const tierCapsRaw = parseTierCapacities(section.tierCapacities ?? null);
+      const tierCaps = tierCapsRaw ?? null;
+
       const data = {
         label: section.label,
         mapX: section.mapX,
@@ -352,6 +403,10 @@ export async function syncMapLayout(organizationId: string, sections: LayoutSect
         deweyRangeEnd: section.deweyRangeEnd ?? null,
         numberOfTiers: section.numberOfTiers ?? null,
         capacityPerTier: section.capacityPerTier ?? null,
+        tierCapacities:
+          tierCaps === null || tierCaps.length === 0
+            ? Prisma.JsonNull
+            : (tierCaps as Prisma.InputJsonValue),
         color: section.color ?? null,
         rotation: section.rotation ?? null,
         notes: section.notes ?? null,

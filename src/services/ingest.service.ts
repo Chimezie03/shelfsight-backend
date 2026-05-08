@@ -47,6 +47,7 @@ export async function uploadImageToS3(
   fileBuffer: Buffer,
   originalName: string,
   mimeType: string,
+  opts?: { organizationId?: string },
 ): Promise<S3UploadResult> {
   const bucket = process.env.S3_BUCKET_NAME || '';
   const key = `ingest/${Date.now()}-${originalName}`;
@@ -73,7 +74,14 @@ export async function uploadImageToS3(
   const s3Url = `https://${bucket}.s3.${awsRegion}.amazonaws.com/${key}`;
 
   // ---- Publish to SQS so the Lambda pipeline can pick it up ----
-  await publishToSqs({ bucket, key, url: s3Url, originalName, mimeType });
+  await publishToSqs({
+    bucket,
+    key,
+    url: s3Url,
+    originalName,
+    mimeType,
+    organizationId: opts?.organizationId,
+  });
 
   return { bucket, key, url: s3Url };
 }
@@ -91,6 +99,7 @@ async function publishToSqs(payload: {
   url: string;
   originalName: string;
   mimeType: string;
+  organizationId?: string;
 }): Promise<void> {
   const queueUrl = process.env.SQS_QUEUE_URL || '';
 
@@ -110,6 +119,7 @@ async function publishToSqs(payload: {
           s3Url: payload.url,
           originalName: payload.originalName,
           mimeType: payload.mimeType,
+          organizationId: payload.organizationId,
           timestamp: new Date().toISOString(),
         }),
       }),
@@ -181,28 +191,52 @@ export function isValidIsbn(isbn: string): boolean {
   return /^(?:\d{9}[\dX]|\d{13})$/.test(isbn);
 }
 
+function isbn13ChecksumOk(isbn: string): boolean {
+  if (isbn.length !== 13 || !/^\d{13}$/.test(isbn)) return false;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    const d = isbn.charCodeAt(i) - 48;
+    sum += i % 2 === 0 ? d : d * 3;
+  }
+  return ((10 - (sum % 10)) % 10) === isbn.charCodeAt(12) - 48;
+}
+
+function isbn10ChecksumOk(isbn: string): boolean {
+  if (isbn.length !== 10 || !/^\d{9}[\dX]$/.test(isbn)) return false;
+  let sum = 0;
+  for (let i = 0; i < 9; i++) sum += (isbn.charCodeAt(i) - 48) * (10 - i);
+  sum += isbn[9] === 'X' ? 10 : isbn.charCodeAt(9) - 48;
+  return sum % 11 === 0;
+}
+
 /**
- * Scans the raw OCR text for an ISBN-13 pattern using the standard regex.
- * Falls back to ISBN-10 detection if no ISBN-13 is found.
- * Returns the first match (digits only) or `null`.
+ * Scans OCR text for an ISBN. Tolerant of multi-space, line breaks, and
+ * digit groups split across formatting. Validates with check-digit so we
+ * don't accept arbitrary 13-digit numbers (e.g. UPCs, phone numbers).
  */
 export function detectIsbn(ocrText: string): string | null {
-  // Standard ISBN-13 regex (may be preceded by "ISBN-13:" etc.)
-  const isbn13Regex =
-    /(?:ISBN(?:-13)?:?\s*)?(97[89][-\s]?[0-9]{1,5}[-\s]?[0-9]+[-\s]?[0-9]+[-\s]?[0-9])/i;
+  if (!ocrText) return null;
 
-  const match13 = isbn13Regex.exec(ocrText);
-  if (match13 && match13[1]) {
-    return match13[1].replace(/[-\s]/g, '');
+  // Pass 1 — labeled form: "ISBN-13: 978-...". Take the next ~20 chars.
+  const labeled = /ISBN(?:[-\s]*1[03])?[:\s]+([\d][\dXx\s-]{8,20})/i.exec(ocrText);
+  if (labeled && labeled[1]) {
+    const norm = normalizeIsbn(labeled[1]);
+    if (norm.length >= 13 && isbn13ChecksumOk(norm.slice(0, 13))) return norm.slice(0, 13);
+    if (norm.length >= 10 && isbn10ChecksumOk(norm.slice(0, 10))) return norm.slice(0, 10);
   }
 
-  // Fallback: ISBN-10 (may end in X)
-  const isbn10Regex =
-    /(?:ISBN(?:-10)?:?\s*)([0-9]{1,5}[-\s]?[0-9]+[-\s]?[0-9]+[-\s]?[0-9Xx])/i;
+  // Pass 2 — strip everything but digits/X and slide a window across the text.
+  // Catches ISBNs split by line breaks or extra whitespace.
+  const compact = ocrText.replace(/[^0-9Xx]/g, '').toUpperCase();
 
-  const match10 = isbn10Regex.exec(ocrText);
-  if (match10 && match10[1]) {
-    return match10[1].replace(/[-\s]/g, '');
+  for (let i = 0; i + 13 <= compact.length; i++) {
+    const slice = compact.slice(i, i + 13);
+    if (/^97[89]\d{10}$/.test(slice) && isbn13ChecksumOk(slice)) return slice;
+  }
+
+  for (let i = 0; i + 10 <= compact.length; i++) {
+    const slice = compact.slice(i, i + 10);
+    if (/^\d{9}[\dX]$/.test(slice) && isbn10ChecksumOk(slice)) return slice;
   }
 
   return null;
@@ -252,9 +286,11 @@ export async function enrichMetadata(isbn: string): Promise<BookMetadata> {
 
   // --- Fallback: Google Books ---
   try {
-    const gRes = await fetch(
-      `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}`,
-    );
+    const apiKey = process.env.GOOGLE_BOOKS_API_KEY || '';
+    const gbUrl = new URL('https://www.googleapis.com/books/v1/volumes');
+    gbUrl.searchParams.set('q', `isbn:${isbn}`);
+    if (apiKey) gbUrl.searchParams.set('key', apiKey);
+    const gRes = await fetch(gbUrl.toString());
     const gData = (await gRes.json()) as any;
     const vol = gData.items?.[0]?.volumeInfo;
 
@@ -276,6 +312,236 @@ export async function enrichMetadata(isbn: string): Promise<BookMetadata> {
   }
 
   return base;
+}
+
+function pickBestIsbn(isbns: string[]): string | null {
+  for (const raw of isbns) {
+    const norm = normalizeIsbn(raw);
+    if (norm.length === 13 && isbn13ChecksumOk(norm)) return norm;
+  }
+  for (const raw of isbns) {
+    const norm = normalizeIsbn(raw);
+    if (norm.length === 10 && isbn10ChecksumOk(norm)) return norm;
+  }
+  return null;
+}
+
+async function searchOpenLibrary(
+  titleQuery: string,
+  authorQuery: string,
+): Promise<BookMetadata | null> {
+  const olUrl = new URL('https://openlibrary.org/search.json');
+  olUrl.searchParams.set('title', titleQuery);
+  if (authorQuery) olUrl.searchParams.set('author', authorQuery);
+  olUrl.searchParams.set('limit', '5');
+  const olRes = await fetch(olUrl.toString());
+  const olData = (await olRes.json()) as { docs?: Array<Record<string, any>> };
+  for (const doc of olData.docs ?? []) {
+    const isbns: string[] = Array.isArray(doc.isbn) ? doc.isbn : [];
+    const picked = pickBestIsbn(isbns);
+    if (!picked) continue;
+    const enriched = await enrichMetadata(picked);
+    if (hasMetadata(enriched)) return enriched;
+    return {
+      isbn: picked,
+      title: typeof doc.title === 'string' ? doc.title : null,
+      author: Array.isArray(doc.author_name) ? doc.author_name.join(', ') : null,
+      publisher: Array.isArray(doc.publisher) ? doc.publisher[0] : null,
+      publishDate: doc.first_publish_year ? String(doc.first_publish_year) : null,
+      coverImageUrl: doc.cover_i
+        ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`
+        : null,
+      subjects: Array.isArray(doc.subject) ? doc.subject.slice(0, 5) : [],
+      source: 'Open Library Search',
+    };
+  }
+  return null;
+}
+
+async function searchGoogleBooks(
+  titleQuery: string,
+  authorQuery: string,
+): Promise<BookMetadata | null> {
+  const apiKey = process.env.GOOGLE_BOOKS_API_KEY || '';
+  const gbUrl = new URL('https://www.googleapis.com/books/v1/volumes');
+  const q = authorQuery ? `intitle:${titleQuery} inauthor:${authorQuery}` : `intitle:${titleQuery}`;
+  gbUrl.searchParams.set('q', q);
+  gbUrl.searchParams.set('maxResults', '5');
+  if (apiKey) gbUrl.searchParams.set('key', apiKey);
+  const gRes = await fetch(gbUrl.toString());
+  const gData = (await gRes.json()) as { items?: Array<{ volumeInfo?: any }> };
+  for (const item of gData.items ?? []) {
+    const ids = item.volumeInfo?.industryIdentifiers ?? [];
+    const candidates: string[] = ids
+      .map((i: any) => (typeof i?.identifier === 'string' ? i.identifier : ''))
+      .filter(Boolean);
+    const picked = pickBestIsbn(candidates);
+    if (!picked) continue;
+    const enriched = await enrichMetadata(picked);
+    if (hasMetadata(enriched)) return enriched;
+    const vol = item.volumeInfo ?? {};
+    return {
+      isbn: picked,
+      title: vol.title ?? null,
+      author: Array.isArray(vol.authors) ? vol.authors.join(', ') : null,
+      publisher: vol.publisher ?? null,
+      publishDate: vol.publishedDate ?? null,
+      coverImageUrl:
+        vol.imageLinks?.thumbnail ?? vol.imageLinks?.smallThumbnail ?? null,
+      subjects: Array.isArray(vol.categories) ? vol.categories : [],
+      source: 'Google Books Search',
+    };
+  }
+  return null;
+}
+
+function normalizeForCompare(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Loose match — equal, or one is a substring of the other after normalization. */
+function titlesLooselyMatch(a: string | null, b: string | null): boolean {
+  if (!a || !b) return false;
+  const na = normalizeForCompare(a);
+  const nb = normalizeForCompare(b);
+  if (!na || !nb) return false;
+  return na === nb || na.includes(nb) || nb.includes(na);
+}
+
+/**
+ * Last-resort: ask the LLM to suggest an ISBN, then VERIFY it against
+ * Open Library / Google Books. The LLM is unreliable about ISBNs (it
+ * confidently hallucinates plausible-looking numbers), so we never trust
+ * the suggestion until enrichMetadata confirms a real catalog entry whose
+ * title loosely matches the OCR-extracted title.
+ */
+async function guessIsbnViaLlm(
+  title: string,
+  author: string | null,
+  ocrText: string,
+): Promise<BookMetadata | null> {
+  if (!process.env.OPENAI_API_KEY) {
+    console.info('[ingest] LLM ISBN fallback skipped — OPENAI_API_KEY not set.');
+    return null;
+  }
+
+  const ocrExcerpt = ocrText.trim().slice(0, 800);
+  // Encourage the LLM to GUESS — we verify every candidate against Open Library
+  // / Google Books before trusting it, so hallucinations are caught downstream.
+  const systemPrompt =
+    'You identify books from partial information. Given a title, optional author, ' +
+    "and OCR text, return up to 5 candidate ISBN-13 (or ISBN-10) values for this exact book — " +
+    'editions, reprints, regional variants, etc. Your guesses will be verified against ' +
+    'Open Library and Google Books, so include even uncertain matches. ' +
+    'Respond ONLY with JSON: {"isbns": ["<digits>", ...]}. Use [] if you have no idea.';
+
+  const userPrompt =
+    `Title: ${title}\n` +
+    `Author: ${author ?? '(unknown)'}\n` +
+    (ocrExcerpt ? `OCR text:\n${ocrExcerpt}\n` : '') +
+    '\nReturn up to 5 ISBN candidates. We will verify each one — guessing is encouraged.';
+
+  let candidates: string[] = [];
+  try {
+    const chat = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4o',
+      temperature: 0.2,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      response_format: { type: 'json_object' },
+    });
+    const raw = chat.choices[0]?.message?.content ?? '{}';
+    const parsed = JSON.parse(raw) as { isbns?: unknown; isbn?: unknown };
+    const list: unknown[] = Array.isArray(parsed.isbns)
+      ? parsed.isbns
+      : typeof parsed.isbn === 'string'
+        ? [parsed.isbn]
+        : [];
+    candidates = list
+      .map((v) => (typeof v === 'string' ? normalizeIsbn(v) : ''))
+      .filter((c) => (c.length === 13 && isbn13ChecksumOk(c)) || (c.length === 10 && isbn10ChecksumOk(c)));
+    console.info(
+      `[ingest] LLM suggested ${candidates.length} ISBN candidate(s) for "${title}": ${candidates.join(', ') || '(none)'}`,
+    );
+  } catch (err: any) {
+    console.warn('[ingest] LLM ISBN guess failed:', err.message);
+    return null;
+  }
+
+  if (candidates.length === 0) return null;
+
+  for (const candidate of candidates) {
+    const enriched = await enrichMetadata(candidate);
+    if (!hasMetadata(enriched)) {
+      console.info(`[ingest] LLM ISBN ${candidate}: no catalog match — skipping.`);
+      continue;
+    }
+    if (!titlesLooselyMatch(enriched.title, title)) {
+      console.info(
+        `[ingest] LLM ISBN ${candidate} → "${enriched.title}" doesn't match "${title}" — skipping.`,
+      );
+      continue;
+    }
+    console.info(`[ingest] LLM ISBN ${candidate} verified — accepting "${enriched.title}".`);
+    return { ...enriched, source: enriched.source ? `${enriched.source}+LLM` : 'LLM-verified' };
+  }
+  console.info(`[ingest] LLM ISBN candidates all failed verification for "${title}".`);
+  return null;
+}
+
+/**
+ * Fallback when OCR text contains no ISBN. Uses LLM-extracted title/author
+ * to search Open Library, then Google Books, returning enriched metadata
+ * (including an ISBN) for the best match. Tries title+author first, then
+ * retries title-only — author spellings from OCR/LLM often don't match
+ * exactly. As a last resort, asks the LLM to suggest an ISBN and verifies
+ * it against Open Library before trusting it. Returns null if nothing matches.
+ */
+export async function searchIsbnByTitleAuthor(
+  title: string,
+  author: string | null,
+  ocrText = '',
+): Promise<BookMetadata | null> {
+  const titleQuery = title?.trim() ?? '';
+  if (!titleQuery) return null;
+  const authorQuery = author?.trim() ?? '';
+
+  console.info(
+    `[ingest] searchIsbnByTitleAuthor title="${titleQuery}" author="${authorQuery || '(none)'}"`,
+  );
+
+  const attempts: Array<{ title: string; author: string }> = [];
+  if (authorQuery) attempts.push({ title: titleQuery, author: authorQuery });
+  attempts.push({ title: titleQuery, author: '' });
+
+  for (const attempt of attempts) {
+    try {
+      const ol = await searchOpenLibrary(attempt.title, attempt.author);
+      if (ol) return ol;
+    } catch (err: any) {
+      console.warn('[ingest] Open Library search failed:', err.message);
+    }
+    try {
+      const gb = await searchGoogleBooks(attempt.title, attempt.author);
+      if (gb) return gb;
+    } catch (err: any) {
+      console.warn('[ingest] Google Books search failed:', err.message);
+    }
+  }
+
+  // Last resort: ask the LLM, then verify the suggestion against real catalogs.
+  const llmGuess = await guessIsbnViaLlm(titleQuery, authorQuery || null, ocrText);
+  if (llmGuess) return llmGuess;
+
+  return null;
 }
 
 export function hasMetadata(metadata: BookMetadata): boolean {

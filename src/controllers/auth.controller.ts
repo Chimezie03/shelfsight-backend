@@ -5,6 +5,8 @@ import {
   signupOrganization,
   acceptInvite,
   getInvitePreview,
+  requestPasswordReset,
+  resetPasswordWithToken,
 } from '../services/auth.service';
 import { AppError } from '../lib/errors';
 
@@ -70,4 +72,20 @@ export async function acceptInviteController(req: Request, res: Response) {
 export async function getInvitePreviewController(req: Request, res: Response) {
   const preview = await getInvitePreview(req.params.token);
   res.json(preview);
+}
+
+export async function forgotPassword(req: Request, res: Response) {
+  const email = typeof req.body?.email === 'string' ? req.body.email : '';
+  await requestPasswordReset(email);
+  res.json({
+    message:
+      'If an account exists for that email, you will receive password reset instructions shortly.',
+  });
+}
+
+export async function resetPassword(req: Request, res: Response) {
+  const token = typeof req.body?.token === 'string' ? req.body.token : '';
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  await resetPasswordWithToken(token, password);
+  res.json({ message: 'Your password has been updated. You can sign in now.' });
 }

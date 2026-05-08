@@ -52,6 +52,7 @@ model User {
   organization   Organization @relation(fields: [organizationId], references: [id])
   organizationId String
   loans          Loan[]
+  passwordResetTokens PasswordResetToken[]
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -62,6 +63,19 @@ enum Role {
   ADMIN
   STAFF
   PATRON
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  tokenHash String    @unique
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Book {
@@ -98,6 +112,8 @@ model BookCopy {
   shelf          ShelfSection?   @relation(fields: [shelfId], references: [id])
   shelfId        String?
   shelfTier      Int?
+  /// 1-based slot index within the tier for map ordering (optional).
+  shelfSlot      Int?
   organization   Organization    @relation(fields: [organizationId], references: [id])
   organizationId String
   loans          Loan[]
@@ -227,6 +243,8 @@ model ShelfSection {
   deweyRangeEnd   String?
   numberOfTiers   Int?         @default(4)
   capacityPerTier Int?         @default(30)
+  /// Optional per-tier capacities (JSON array of positive integers). When null, capacityPerTier applies to all tiers.
+  tierCapacities  Json?
   color           String?      @default("#1B2A4A")
   rotation        Int?         @default(0)
   notes           String?

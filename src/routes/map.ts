@@ -8,6 +8,7 @@ import {
   updateSection,
   listShelfBooks,
   saveLayout,
+  placementHints,
 } from '../controllers/map.controller';
 import { requireAuth, requireRole } from '../middleware/auth.middleware';
 
@@ -18,6 +19,8 @@ router.get('/', requireAuth, wrapAsync(listSections));
 
 // Bulk layout save — must come before /:id routes
 router.put('/layout', requireAuth, requireRole('ADMIN', 'STAFF'), wrapAsync(saveLayout));
+
+router.get('/placement-hints', requireAuth, wrapAsync(placementHints));
 
 router.get('/:id', requireAuth, wrapAsync(getSection));
 router.get('/:id/books', requireAuth, wrapAsync(listShelfBooks));

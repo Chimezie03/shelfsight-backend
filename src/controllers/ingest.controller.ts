@@ -10,6 +10,7 @@ import {
   normalizeIsbn,
   classifyDeweyDecimal,
   extractMetadataFromOcr,
+  searchIsbnByTitleAuthor,
   createIngestionJob,
   listIngestionJobs,
   getIngestionJobById,
@@ -88,7 +89,9 @@ async function processSingleImage(
 ): Promise<ProcessedIngestionResult> {
   ensureAllowedMime(file);
 
-  const s3Result = await uploadImageToS3(file.buffer, file.originalname, file.mimetype);
+  const s3Result = await uploadImageToS3(file.buffer, file.originalname, file.mimetype, {
+    organizationId,
+  });
   const ocrText = (await extractTextFromImage(file.buffer)).trim();
 
   const detectedRaw = detectIsbn(ocrText);
@@ -143,19 +146,40 @@ async function processSingleImage(
     }
   } else {
     const ocrMeta = await extractMetadataFromOcr(ocrText);
-    metadata = {
-      ...metadata,
-      title: ocrMeta.title,
-      author: ocrMeta.author,
-      subjects: ocrMeta.subjects,
-      source: 'OCR+LLM',
-    };
     language = ocrMeta.language;
-    dewey = {
-      dewey_class: ocrMeta.dewey_class,
-      confidence_score: ocrMeta.confidence_score,
-      reasoning: ocrMeta.reasoning,
-    };
+
+    const searched = ocrMeta.title
+      ? await searchIsbnByTitleAuthor(ocrMeta.title, ocrMeta.author, ocrText)
+      : null;
+
+    if (searched && searched.isbn) {
+      metadata = {
+        ...searched,
+        source: searched.source ? `${searched.source}+OCR` : 'OCR+Search',
+      };
+      const searchDewey = await classifyDeweyDecimal(ocrText, metadata);
+      dewey =
+        searchDewey.dewey_class && searchDewey.confidence_score >= 40
+          ? searchDewey
+          : {
+              dewey_class: ocrMeta.dewey_class,
+              confidence_score: ocrMeta.confidence_score,
+              reasoning: ocrMeta.reasoning,
+            };
+    } else {
+      metadata = {
+        ...metadata,
+        title: ocrMeta.title,
+        author: ocrMeta.author,
+        subjects: ocrMeta.subjects,
+        source: 'OCR+LLM',
+      };
+      dewey = {
+        dewey_class: ocrMeta.dewey_class,
+        confidence_score: ocrMeta.confidence_score,
+        reasoning: ocrMeta.reasoning,
+      };
+    }
   }
 
   const job = await createIngestionJob(organizationId, {

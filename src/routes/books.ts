@@ -6,6 +6,7 @@ import {
   getBook,
   createBook,
   bulkCreateBooks,
+  bulkCreateBooksFromIsbns,
   bulkUploadFile,
   updateBook,
   deleteBook,
@@ -20,6 +21,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 router.get('/', requireAuth, wrapAsync(getBooks));
 router.get('/:id', requireAuth, wrapAsync(getBook));
 router.post('/bulk', requireAuth, requireRole('ADMIN', 'STAFF'), wrapAsync(bulkCreateBooks));
+router.post('/bulk-isbn', requireAuth, requireRole('ADMIN', 'STAFF'), wrapAsync(bulkCreateBooksFromIsbns));
 router.post('/bulk-file', requireAuth, requireRole('ADMIN', 'STAFF'), upload.single('file'), wrapAsync(bulkUploadFile));
 router.post('/', requireAuth, requireRole('ADMIN', 'STAFF'), wrapAsync(createBook));
 router.put('/:id', requireAuth, requireRole('ADMIN', 'STAFF'), wrapAsync(updateBook));
